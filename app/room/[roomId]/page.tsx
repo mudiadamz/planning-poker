@@ -169,6 +169,19 @@ export default function RoomPage({ params }: { params: Params }) {
         if (!payload?.emoji) return;
         spawnFloater(payload.emoji, payload.from || "Anon");
       })
+      .on("broadcast", { event: "leave" }, (msg) => {
+        // Instant heads-up that someone left, in case the postgres_changes
+        // DELETE event is delayed or missed. Idempotent with the DELETE
+        // handler — both just remove the player from local state.
+        const payload = msg.payload as { player_id?: string } | undefined;
+        const id = payload?.player_id;
+        if (!id) return;
+        setPlayers((prev) => {
+          if (!prev.some((x) => x.id === id)) return prev;
+          if (id !== playerIdRef.current) playSound("leave");
+          return prev.filter((x) => x.id !== id);
+        });
+      })
       .subscribe();
 
     channelRef.current = channel;
@@ -399,6 +412,20 @@ export default function RoomPage({ params }: { params: Params }) {
     setLeaving(true);
     if (playerId) {
       const supabase = getSupabase();
+      // Broadcast first so other clients see us disappear instantly,
+      // even before the DELETE row event propagates.
+      const channel = channelRef.current;
+      if (channel) {
+        try {
+          await channel.send({
+            type: "broadcast",
+            event: "leave",
+            payload: { player_id: playerId },
+          });
+        } catch {
+          // ignore — best effort
+        }
+      }
       try {
         await supabase.from("players").delete().eq("id", playerId);
       } catch {

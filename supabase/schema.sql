@@ -43,7 +43,15 @@ create index if not exists voting_rounds_created_at_idx  on public.voting_rounds
 
 -- =====================================================================
 -- Realtime: publish both tables so clients get postgres_changes events.
+--
+-- IMPORTANT: REPLICA IDENTITY FULL is required so DELETE events include
+-- the full old row (e.g. `room_id`). Without it, postgres_changes filters
+-- like `room_id=eq.<id>` cannot match deletes and clients won't see when
+-- a player leaves.
 -- =====================================================================
+alter table public.rooms   replica identity full;
+alter table public.players replica identity full;
+
 do $$
 begin
   if not exists (
