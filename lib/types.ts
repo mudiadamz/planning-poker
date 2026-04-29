@@ -3,6 +3,8 @@ export type Room = {
   name: string | null;
   deck: string[];
   revealed: boolean;
+  /** Optional explicit owner override. Falls back to oldest joined player. */
+  owner_id: string | null;
   created_at: string;
 };
 

@@ -15,6 +15,7 @@ type Props = {
   onReveal: () => void;
   onReset: () => void;
   onKick?: (playerId: string) => void;
+  onTransferOwnership?: (playerId: string) => void;
   busy: boolean;
 };
 
@@ -80,6 +81,7 @@ export function PokerTable({
   onReveal,
   onReset,
   onKick,
+  onTransferOwnership,
   busy,
 }: Props) {
   const seats = useMemo(() => seatPlayers(players), [players]);
@@ -121,8 +123,9 @@ export function PokerTable({
             isMe={p.id === meId}
             isOwner={p.id === ownerId}
             highlight={isHighlighted(p)}
-            canKick={isOwner}
+            canManage={isOwner}
             onKick={onKick}
+            onTransferOwnership={onTransferOwnership}
           />
         ))}
       </div>
@@ -138,8 +141,9 @@ export function PokerTable({
               isMe={p.id === meId}
               isOwner={p.id === ownerId}
               highlight={isHighlighted(p)}
-              canKick={isOwner}
+              canManage={isOwner}
               onKick={onKick}
+              onTransferOwnership={onTransferOwnership}
             />
           ))}
         </div>
@@ -190,8 +194,9 @@ export function PokerTable({
               isMe={p.id === meId}
               isOwner={p.id === ownerId}
               highlight={isHighlighted(p)}
-              canKick={isOwner}
+              canManage={isOwner}
               onKick={onKick}
+              onTransferOwnership={onTransferOwnership}
             />
           ))}
         </div>
@@ -207,8 +212,9 @@ export function PokerTable({
             isMe={p.id === meId}
             isOwner={p.id === ownerId}
             highlight={isHighlighted(p)}
-            canKick={isOwner}
+            canManage={isOwner}
             onKick={onKick}
+            onTransferOwnership={onTransferOwnership}
           />
         ))}
       </div>

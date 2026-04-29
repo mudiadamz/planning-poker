@@ -232,14 +232,21 @@ export default function RoomPage({ params }: { params: Params }) {
     [players, playerId],
   );
 
-  // Owner = pemain pertama yang join (joined_at paling awal). Jika owner
-  // keluar, otomatis pindah ke pemain berikutnya (urutan berikutnya).
+  // Owner resolution mirrors the SQL `current_room_owner`:
+  //   1. If `room.owner_id` is set AND that player is still in the room → owner.
+  //   2. Else fall back to the earliest-joined player.
+  // This way, if the explicit owner leaves, ownership auto-transfers to the
+  // next-oldest player without any extra bookkeeping.
   const owner = useMemo(() => {
     if (players.length === 0) return null;
+    if (room?.owner_id) {
+      const explicit = players.find((p) => p.id === room.owner_id);
+      if (explicit) return explicit;
+    }
     return [...players].sort((a, b) =>
       a.joined_at.localeCompare(b.joined_at),
     )[0];
-  }, [players]);
+  }, [players, room?.owner_id]);
 
   const isOwner = !!owner && !!me && owner.id === me.id;
 
@@ -358,6 +365,33 @@ export default function RoomPage({ params }: { params: Params }) {
       });
     },
     [me, playerName, spawnFloater],
+  );
+
+  const handleTransferOwnership = useCallback(
+    async (targetId: string) => {
+      if (!room || !isOwner || !playerId || targetId === playerId) return;
+      const target = players.find((p) => p.id === targetId);
+      if (!target) return;
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(
+          `Pindahkan kepemilikan room ke ${target.name}? Kamu akan kehilangan kontrol owner.`,
+        )
+      ) {
+        return;
+      }
+      const supabase = getSupabase();
+      const { error: err } = await supabase.rpc("transfer_room_ownership", {
+        p_room_id: room.id,
+        p_owner_id: playerId,
+        p_new_owner_id: targetId,
+      });
+      if (err) {
+        console.error(err);
+        setError("Gagal memindahkan kepemilikan.");
+      }
+    },
+    [room, isOwner, playerId, players],
   );
 
   const handleKick = useCallback(
@@ -498,6 +532,7 @@ export default function RoomPage({ params }: { params: Params }) {
             onReveal={handleReveal}
             onReset={handleReset}
             onKick={handleKick}
+            onTransferOwnership={handleTransferOwnership}
             busy={busy}
           />
         </div>

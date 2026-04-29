@@ -12,9 +12,10 @@ type Props = {
   isMe?: boolean;
   isOwner?: boolean;
   highlight?: boolean;
-  /** True when the local user is the room owner and may kick others. */
-  canKick?: boolean;
+  /** True when the local user is the room owner and may manage others. */
+  canManage?: boolean;
   onKick?: (playerId: string) => void;
+  onTransferOwnership?: (playerId: string) => void;
 };
 
 export function PlayerSeat({
@@ -23,10 +24,13 @@ export function PlayerSeat({
   isMe,
   isOwner,
   highlight,
-  canKick,
+  canManage,
   onKick,
+  onTransferOwnership,
 }: Props) {
-  const showKick = canKick && !isMe && onKick;
+  // Owner actions (kick / transfer) only show on hover when the local user is
+  // the owner and the seat is someone else.
+  const showActions = canManage && !isMe && !isOwner;
 
   return (
     <div className="group relative flex flex-col items-center gap-1.5 sm:gap-2">
@@ -36,16 +40,31 @@ export function PlayerSeat({
         highlight={highlight}
         size="md"
       />
-      {showKick && (
-        <button
-          type="button"
-          onClick={() => onKick!(player.id)}
-          className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-red-500/60 bg-slate-900 text-red-300 opacity-0 shadow transition hover:bg-red-500 hover:text-white group-hover:opacity-100 focus:opacity-100"
-          title={`Keluarkan ${player.name}`}
-          aria-label={`Keluarkan ${player.name}`}
-        >
-          <X className="h-3 w-3" />
-        </button>
+      {showActions && (
+        <div className="absolute -right-1.5 -top-1.5 z-10 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+          {onTransferOwnership && (
+            <button
+              type="button"
+              onClick={() => onTransferOwnership(player.id)}
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-amber-400/60 bg-slate-900 text-amber-300 shadow transition hover:bg-amber-400 hover:text-slate-900"
+              title={`Jadikan ${player.name} owner room`}
+              aria-label={`Jadikan ${player.name} owner room`}
+            >
+              <Crown className="h-3 w-3" />
+            </button>
+          )}
+          {onKick && (
+            <button
+              type="button"
+              onClick={() => onKick(player.id)}
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-red-500/60 bg-slate-900 text-red-300 shadow transition hover:bg-red-500 hover:text-white"
+              title={`Keluarkan ${player.name}`}
+              aria-label={`Keluarkan ${player.name}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       )}
       <div
         className={cn(

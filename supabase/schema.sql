@@ -9,8 +9,16 @@ create table if not exists public.rooms (
   name        text,
   deck        jsonb       not null default '["1","2","3","5","8","13","?"]'::jsonb,
   revealed    boolean     not null default false,
+  -- Optional explicit owner override. When set and pointing to a player
+  -- still in the room, that player is the owner. When null (or the
+  -- referenced player has left), ownership falls back to the
+  -- earliest-joined player (see is_room_owner / current_room_owner).
+  owner_id    uuid,
   created_at  timestamptz not null default now()
 );
+
+-- Backfill for existing rooms tables.
+alter table public.rooms add column if not exists owner_id uuid;
 
 -- Players belong to a room. `vote` is null until they pick a card.
 create table if not exists public.players (
@@ -121,6 +129,31 @@ create policy "players_anon_all"
 -- automatically becomes owner — no extra bookkeeping needed.
 -- =====================================================================
 
+-- Returns the effective owner of the given room: the player referenced by
+-- rooms.owner_id when that player is still present, otherwise the
+-- earliest-joined player. NULL if the room has no players.
+create or replace function public.current_room_owner(p_room_id text)
+returns uuid
+language sql
+stable
+as $$
+  select coalesce(
+    (
+      select r.owner_id
+      from public.rooms r
+      join public.players p
+        on p.room_id = r.id and p.id = r.owner_id
+      where r.id = p_room_id
+    ),
+    (
+      select id from public.players
+      where room_id = p_room_id
+      order by joined_at asc
+      limit 1
+    )
+  );
+$$;
+
 create or replace function public.is_room_owner(
   p_room_id   text,
   p_player_id uuid
@@ -129,17 +162,7 @@ returns boolean
 language sql
 stable
 as $$
-  select exists (
-    select 1
-    from public.players
-    where room_id = p_room_id
-      and id      = p_player_id
-      and joined_at = (
-        select min(joined_at)
-        from public.players
-        where room_id = p_room_id
-      )
-  );
+  select public.current_room_owner(p_room_id) = p_player_id;
 $$;
 
 create or replace function public.reveal_room(
@@ -244,6 +267,39 @@ begin
 end;
 $$;
 
+create or replace function public.transfer_room_ownership(
+  p_room_id      text,
+  p_owner_id     uuid,
+  p_new_owner_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_room_owner(p_room_id, p_owner_id) then
+    raise exception 'Only the room owner can transfer ownership'
+      using errcode = '42501';
+  end if;
+  if p_new_owner_id is null then
+    raise exception 'New owner id is required';
+  end if;
+  if p_owner_id = p_new_owner_id then
+    -- No-op transfer; just normalize owner_id and exit cleanly.
+    update public.rooms set owner_id = p_new_owner_id where id = p_room_id;
+    return;
+  end if;
+  if not exists (
+    select 1 from public.players
+     where id = p_new_owner_id and room_id = p_room_id
+  ) then
+    raise exception 'Target player is not in this room';
+  end if;
+  update public.rooms set owner_id = p_new_owner_id where id = p_room_id;
+end;
+$$;
+
 create or replace function public.update_room_deck(
   p_room_id   text,
   p_player_id uuid,
@@ -269,15 +325,17 @@ begin
 end;
 $$;
 
-revoke all on function public.reveal_room(text, uuid)              from public;
-revoke all on function public.reset_room(text, uuid)               from public;
-revoke all on function public.update_room_deck(text, uuid, jsonb)  from public;
-revoke all on function public.kick_player(text, uuid, uuid)        from public;
+revoke all on function public.reveal_room(text, uuid)                 from public;
+revoke all on function public.reset_room(text, uuid)                  from public;
+revoke all on function public.update_room_deck(text, uuid, jsonb)     from public;
+revoke all on function public.kick_player(text, uuid, uuid)           from public;
+revoke all on function public.transfer_room_ownership(text, uuid, uuid) from public;
 
-grant execute on function public.reveal_room(text, uuid)             to anon, authenticated;
-grant execute on function public.reset_room(text, uuid)              to anon, authenticated;
-grant execute on function public.update_room_deck(text, uuid, jsonb) to anon, authenticated;
-grant execute on function public.kick_player(text, uuid, uuid)       to anon, authenticated;
+grant execute on function public.reveal_room(text, uuid)                to anon, authenticated;
+grant execute on function public.reset_room(text, uuid)                 to anon, authenticated;
+grant execute on function public.update_room_deck(text, uuid, jsonb)    to anon, authenticated;
+grant execute on function public.kick_player(text, uuid, uuid)          to anon, authenticated;
+grant execute on function public.transfer_room_ownership(text, uuid, uuid) to anon, authenticated;
 
 -- =====================================================================
 -- voting_rounds: locked down. Only the service role (used by /admin via
