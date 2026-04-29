@@ -14,6 +14,7 @@ type Props = {
   isOwner: boolean;
   onReveal: () => void;
   onReset: () => void;
+  onKick?: (playerId: string) => void;
   busy: boolean;
 };
 
@@ -78,6 +79,7 @@ export function PokerTable({
   isOwner,
   onReveal,
   onReset,
+  onKick,
   busy,
 }: Props) {
   const seats = useMemo(() => seatPlayers(players), [players]);
@@ -119,6 +121,8 @@ export function PokerTable({
             isMe={p.id === meId}
             isOwner={p.id === ownerId}
             highlight={isHighlighted(p)}
+            canKick={isOwner}
+            onKick={onKick}
           />
         ))}
       </div>
@@ -134,6 +138,8 @@ export function PokerTable({
               isMe={p.id === meId}
               isOwner={p.id === ownerId}
               highlight={isHighlighted(p)}
+              canKick={isOwner}
+              onKick={onKick}
             />
           ))}
         </div>
@@ -184,6 +190,8 @@ export function PokerTable({
               isMe={p.id === meId}
               isOwner={p.id === ownerId}
               highlight={isHighlighted(p)}
+              canKick={isOwner}
+              onKick={onKick}
             />
           ))}
         </div>
@@ -199,6 +207,8 @@ export function PokerTable({
             isMe={p.id === meId}
             isOwner={p.id === ownerId}
             highlight={isHighlighted(p)}
+            canKick={isOwner}
+            onKick={onKick}
           />
         ))}
       </div>

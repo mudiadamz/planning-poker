@@ -8,10 +8,13 @@ import {
   LogOut,
   Pencil,
   UserCircle2,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { isMuted, setMuted } from "@/lib/sounds";
 import { EmojiBlaster } from "./EmojiBlaster";
 
 type Props = {
@@ -36,7 +39,24 @@ export function RoomControls({
   onLeave,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  const [muted, setMutedState] = useState(false);
   const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    setMutedState(isMuted());
+    function onMuteChange() {
+      setMutedState(isMuted());
+    }
+    window.addEventListener("poker-mute-change", onMuteChange);
+    return () =>
+      window.removeEventListener("poker-mute-change", onMuteChange);
+  }, []);
+
+  function toggleMute() {
+    const next = !muted;
+    setMuted(next);
+    setMutedState(next);
+  }
   const [draft, setDraft] = useState(playerName ?? "");
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -175,6 +195,24 @@ export function RoomControls({
         {canReact && onEmoji && (
           <EmojiBlaster onPick={onEmoji} />
         )}
+
+        <button
+          type="button"
+          onClick={toggleMute}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition hover:border-accent hover:text-accent sm:px-3",
+            muted && "border-amber-500/60 text-amber-300",
+          )}
+          title={muted ? "Suara dimatikan" : "Matikan suara"}
+          aria-label={muted ? "Aktifkan suara" : "Matikan suara"}
+          aria-pressed={muted}
+        >
+          {muted ? (
+            <VolumeX className="h-3.5 w-3.5" />
+          ) : (
+            <Volume2 className="h-3.5 w-3.5" />
+          )}
+        </button>
 
         <button
           onClick={copyLink}

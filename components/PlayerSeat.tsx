@@ -1,6 +1,6 @@
 "use client";
 
-import { Crown } from "lucide-react";
+import { Crown, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import type { Player } from "@/lib/types";
@@ -12,6 +12,9 @@ type Props = {
   isMe?: boolean;
   isOwner?: boolean;
   highlight?: boolean;
+  /** True when the local user is the room owner and may kick others. */
+  canKick?: boolean;
+  onKick?: (playerId: string) => void;
 };
 
 export function PlayerSeat({
@@ -20,15 +23,30 @@ export function PlayerSeat({
   isMe,
   isOwner,
   highlight,
+  canKick,
+  onKick,
 }: Props) {
+  const showKick = canKick && !isMe && onKick;
+
   return (
-    <div className="flex flex-col items-center gap-1.5 sm:gap-2">
+    <div className="group relative flex flex-col items-center gap-1.5 sm:gap-2">
       <Card
         value={player.vote}
         revealed={revealed}
         highlight={highlight}
         size="md"
       />
+      {showKick && (
+        <button
+          type="button"
+          onClick={() => onKick!(player.id)}
+          className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-red-500/60 bg-slate-900 text-red-300 opacity-0 shadow transition hover:bg-red-500 hover:text-white group-hover:opacity-100 focus:opacity-100"
+          title={`Keluarkan ${player.name}`}
+          aria-label={`Keluarkan ${player.name}`}
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
       <div
         className={cn(
           "flex max-w-[100px] items-center justify-center gap-1 truncate text-center text-xs font-medium sm:max-w-[140px] sm:text-sm",

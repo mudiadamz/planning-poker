@@ -25,6 +25,22 @@ create table if not exists public.players (
 create index if not exists players_room_id_idx on public.players (room_id);
 create index if not exists players_last_seen_idx on public.players (last_seen);
 
+-- Voting history: one row per completed voting round (snapshot at reset).
+create table if not exists public.voting_rounds (
+  id           uuid        primary key default gen_random_uuid(),
+  room_id      text        not null references public.rooms(id) on delete cascade,
+  room_name    text,
+  deck         jsonb       not null,
+  -- Array of { player_id, name, vote }
+  votes        jsonb       not null default '[]'::jsonb,
+  vote_count   integer     not null default 0,
+  average      numeric,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists voting_rounds_room_id_idx     on public.voting_rounds (room_id);
+create index if not exists voting_rounds_created_at_idx  on public.voting_rounds (created_at desc);
+
 -- =====================================================================
 -- Realtime: publish both tables so clients get postgres_changes events.
 -- =====================================================================
@@ -145,13 +161,78 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_room        public.rooms%rowtype;
+  v_votes       jsonb;
+  v_vote_count  integer;
+  v_average     numeric;
 begin
   if not public.is_room_owner(p_room_id, p_player_id) then
     raise exception 'Only the room owner can reset votes'
       using errcode = '42501';
   end if;
+
+  select * into v_room from public.rooms where id = p_room_id;
+  if not found then
+    raise exception 'Room not found';
+  end if;
+
+  -- Only snapshot to history when there were actually revealed votes — i.e.
+  -- the round was finished. Resetting a fresh / unrevealed room is a no-op
+  -- for history.
+  if v_room.revealed then
+    select
+      coalesce(jsonb_agg(jsonb_build_object(
+        'player_id', p.id,
+        'name',      p.name,
+        'vote',      p.vote
+      ) order by p.joined_at), '[]'::jsonb),
+      count(*) filter (where p.vote is not null),
+      avg(
+        case
+          when p.vote ~ '^-?[0-9]+(\.[0-9]+)?$' then p.vote::numeric
+          when p.vote ~ '^[0-9]+/[1-9][0-9]*$' then
+            split_part(p.vote, '/', 1)::numeric / split_part(p.vote, '/', 2)::numeric
+          else null
+        end
+      )
+    into v_votes, v_vote_count, v_average
+    from public.players p
+    where p.room_id = p_room_id;
+
+    if v_vote_count > 0 then
+      insert into public.voting_rounds
+        (room_id, room_name, deck, votes, vote_count, average)
+      values
+        (p_room_id, v_room.name, v_room.deck, v_votes, v_vote_count, v_average);
+    end if;
+  end if;
+
   update public.players set vote = null    where room_id = p_room_id;
   update public.rooms   set revealed = false where id     = p_room_id;
+end;
+$$;
+
+create or replace function public.kick_player(
+  p_room_id   text,
+  p_owner_id  uuid,
+  p_target_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_room_owner(p_room_id, p_owner_id) then
+    raise exception 'Only the room owner can kick players'
+      using errcode = '42501';
+  end if;
+  if p_owner_id = p_target_id then
+    raise exception 'Owner cannot kick themselves';
+  end if;
+  delete from public.players
+   where id = p_target_id and room_id = p_room_id;
 end;
 $$;
 
@@ -183,7 +264,19 @@ $$;
 revoke all on function public.reveal_room(text, uuid)              from public;
 revoke all on function public.reset_room(text, uuid)               from public;
 revoke all on function public.update_room_deck(text, uuid, jsonb)  from public;
+revoke all on function public.kick_player(text, uuid, uuid)        from public;
 
 grant execute on function public.reveal_room(text, uuid)             to anon, authenticated;
 grant execute on function public.reset_room(text, uuid)              to anon, authenticated;
 grant execute on function public.update_room_deck(text, uuid, jsonb) to anon, authenticated;
+grant execute on function public.kick_player(text, uuid, uuid)       to anon, authenticated;
+
+-- =====================================================================
+-- voting_rounds: locked down. Only the service role (used by /admin via
+-- Next.js server routes) can read. Nobody can write directly — rows are
+-- inserted by reset_room() which runs as SECURITY DEFINER (bypasses RLS).
+-- =====================================================================
+alter table public.voting_rounds enable row level security;
+
+-- Intentionally NO policies for anon/authenticated → all direct access
+-- denied. service_role bypasses RLS so the /admin server routes can read.

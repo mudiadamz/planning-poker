@@ -8,7 +8,11 @@ import { Loader2 } from "lucide-react";
 import { getSupabase } from "@/lib/supabase";
 import { useIdentity } from "@/lib/store";
 import { DEFAULT_DECK } from "@/lib/decks";
-import { cleanupStalePlayers, useHeartbeat } from "@/lib/useHeartbeat";
+import {
+  cleanupStalePlayers,
+  useHeartbeat,
+  useStalePlayerCleanup,
+} from "@/lib/useHeartbeat";
 import type { Player, Room } from "@/lib/types";
 import { JoinDialog } from "@/components/JoinDialog";
 import { RoomControls } from "@/components/RoomControls";
@@ -20,6 +24,7 @@ import {
   EmojiBlastLayer,
   type EmojiFloater,
 } from "@/components/EmojiBlastLayer";
+import { playSound } from "@/lib/sounds";
 
 type Params = Promise<{ roomId: string }>;
 
@@ -36,8 +41,13 @@ export default function RoomPage({ params }: { params: Params }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [floaters, setFloaters] = useState<EmojiFloater[]>([]);
+  const [leaving, setLeaving] = useState(false);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const playerIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    playerIdRef.current = playerId;
+  }, [playerId]);
 
   const spawnFloater = useCallback((emoji: string, from: string) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -111,7 +121,14 @@ export default function RoomPage({ params }: { params: Params }) {
             setNotFound(true);
             return;
           }
-          setRoom(payload.new as Room);
+          const next = payload.new as Room;
+          setRoom((prev) => {
+            if (prev) {
+              if (!prev.revealed && next.revealed) playSound("reveal");
+              else if (prev.revealed && !next.revealed) playSound("reset");
+            }
+            return next;
+          });
         },
       )
       .on(
@@ -125,9 +142,11 @@ export default function RoomPage({ params }: { params: Params }) {
         (payload) => {
           if (payload.eventType === "INSERT") {
             const p = payload.new as Player;
-            setPlayers((prev) =>
-              prev.some((x) => x.id === p.id) ? prev : [...prev, p],
-            );
+            setPlayers((prev) => {
+              if (prev.some((x) => x.id === p.id)) return prev;
+              if (p.id !== playerIdRef.current) playSound("join");
+              return [...prev, p];
+            });
           } else if (payload.eventType === "UPDATE") {
             const p = payload.new as Player;
             setPlayers((prev) =>
@@ -135,7 +154,11 @@ export default function RoomPage({ params }: { params: Params }) {
             );
           } else if (payload.eventType === "DELETE") {
             const old = payload.old as Player;
-            setPlayers((prev) => prev.filter((x) => x.id !== old.id));
+            setPlayers((prev) => {
+              if (!prev.some((x) => x.id === old.id)) return prev;
+              if (old.id !== playerIdRef.current) playSound("leave");
+              return prev.filter((x) => x.id !== old.id);
+            });
           }
         },
       )
@@ -155,22 +178,29 @@ export default function RoomPage({ params }: { params: Params }) {
     };
   }, [room, roomId, spawnFloater]);
 
-  // Verify our locally-stored player still exists in DB; if not, force re-join.
+  // Verify our locally-stored player still exists in DB; if not, we were
+  // either kicked by the owner or removed for being stale. Show a notice
+  // and redirect home rather than the rejoin dialog.
   useEffect(() => {
-    if (loading || !room || !playerId) return;
+    if (loading || !room || !playerId || leaving) return;
     const stillThere = players.some((p) => p.id === playerId);
     if (!stillThere && players.length > 0) {
-      // Don't immediately clear — initial fetch may not yet contain us; only
-      // clear once we are certain we were removed (we have other players).
       const timer = window.setTimeout(() => {
         const exists = players.some((p) => p.id === playerId);
-        if (!exists) clear();
+        if (exists) return;
+        setLeaving(true);
+        clear();
+        if (typeof window !== "undefined") {
+          window.alert("Kamu dikeluarkan / disconnect dari room ini.");
+        }
+        router.push("/");
       }, 1500);
       return () => window.clearTimeout(timer);
     }
-  }, [loading, room, players, playerId, clear]);
+  }, [loading, room, players, playerId, leaving, clear, router]);
 
   useHeartbeat(playerId, roomId);
+  useStalePlayerCleanup(playerId ? roomId : null);
 
   // Cleanup on tab close / unload
   useEffect(() => {
@@ -200,7 +230,7 @@ export default function RoomPage({ params }: { params: Params }) {
 
   const isOwner = !!owner && !!me && owner.id === me.id;
 
-  const needsJoin = !loading && !notFound && room && !me;
+  const needsJoin = !loading && !notFound && room && !me && !leaving;
 
   const handleJoin = useCallback(
     async (name: string) => {
@@ -227,6 +257,7 @@ export default function RoomPage({ params }: { params: Params }) {
     async (value: string) => {
       if (!playerId || !room || room.revealed) return;
       const supabase = getSupabase();
+      playSound("pick");
       // Optimistic update
       setPlayers((prev) =>
         prev.map((p) =>
@@ -316,6 +347,31 @@ export default function RoomPage({ params }: { params: Params }) {
     [me, playerName, spawnFloater],
   );
 
+  const handleKick = useCallback(
+    async (targetId: string) => {
+      if (!room || !isOwner || !playerId || targetId === playerId) return;
+      const target = players.find((p) => p.id === targetId);
+      if (!target) return;
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(`Keluarkan ${target.name} dari room?`)
+      ) {
+        return;
+      }
+      const supabase = getSupabase();
+      const { error: err } = await supabase.rpc("kick_player", {
+        p_room_id: room.id,
+        p_owner_id: playerId,
+        p_target_id: targetId,
+      });
+      if (err) {
+        console.error(err);
+        setError("Gagal mengeluarkan pemain.");
+      }
+    },
+    [room, isOwner, playerId, players],
+  );
+
   const handleRename = useCallback(
     async (newName: string) => {
       const trimmed = newName.trim();
@@ -340,6 +396,7 @@ export default function RoomPage({ params }: { params: Params }) {
   );
 
   const handleLeave = useCallback(async () => {
+    setLeaving(true);
     if (playerId) {
       const supabase = getSupabase();
       try {
@@ -413,6 +470,7 @@ export default function RoomPage({ params }: { params: Params }) {
             isOwner={isOwner}
             onReveal={handleReveal}
             onReset={handleReset}
+            onKick={handleKick}
             busy={busy}
           />
         </div>
