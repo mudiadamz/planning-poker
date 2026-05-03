@@ -36,49 +36,51 @@ export function JoinDialog({ defaultName = "", onJoin }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-felt-dark/80 px-4 backdrop-blur-sm">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-2xl border border-slate-700/60 bg-slate-900/95 p-6 shadow-2xl"
+        className="wood-frame w-full max-w-sm rounded-2xl p-1.5"
       >
-        <div className="mb-4 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/15 text-accent ring-1 ring-accent/30">
-            <UserCircle2 className="h-5 w-5" />
+        <div className="rounded-xl bg-ivory-soft/95 p-6 text-wood-dark">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-gold/60 bg-wood text-gold-soft">
+              <UserCircle2 className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="font-serif text-base font-bold text-wood-dark">
+                Masuk ke room
+              </h2>
+              <p className="text-xs text-wood/80">
+                Pilih nama tampilan kamu (emoji boleh).
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-base font-semibold text-white">
-              Masuk ke room
-            </h2>
-            <p className="text-xs text-slate-400">
-              Pilih nama tampilan kamu (emoji boleh).
-            </p>
-          </div>
+
+          <label className="mb-2 block font-serif text-xs font-bold uppercase tracking-wider text-wood">
+            Nama
+          </label>
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder=""
+            maxLength={32}
+            className="mb-3 w-full rounded-lg border-2 border-wood/30 bg-ivory-soft px-3 py-2 text-sm text-wood-dark outline-none transition focus:border-gold focus:ring-1 focus:ring-gold"
+          />
+
+          {error && (
+            <p className="mb-3 text-xs text-red-700">{error}</p>
+          )}
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="brass-button inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 font-serif text-sm font-bold uppercase tracking-wider transition disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+            Masuk
+          </button>
         </div>
-
-        <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-400">
-          Nama
-        </label>
-        <input
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder=""
-          maxLength={32}
-          className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none transition focus:border-accent focus:ring-1 focus:ring-accent"
-        />
-
-        {error && (
-          <p className="mb-3 text-xs text-red-400">{error}</p>
-        )}
-
-        <button
-          type="submit"
-          disabled={submitting}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          Masuk
-        </button>
       </form>
     </div>
   );

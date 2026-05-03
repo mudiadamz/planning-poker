@@ -115,18 +115,21 @@ export function RoomControls({
     setEditing(false);
   }
 
+  const pillBase =
+    "inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-wood-dark/70 px-2.5 py-1.5 text-xs font-medium text-ivory transition hover:border-gold hover:text-gold-soft sm:px-3";
+
   return (
-    <header className="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-3 sm:gap-3 sm:px-6">
+    <header className="wood flex w-full flex-wrap items-center justify-between gap-2 border-b-2 border-gold/60 px-3 py-3 shadow-[inset_0_-2px_0_rgba(212,175,55,0.25)] sm:gap-3 sm:px-6">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent ring-1 ring-accent/30">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gold/15 text-gold-soft ring-1 ring-gold/50">
           <LinkIcon className="h-4 w-4" />
         </div>
         <div className="min-w-0 leading-tight">
-          <div className="truncate text-sm font-semibold text-white">
+          <div className="truncate font-serif text-sm font-bold text-ivory-soft">
             {roomName || "Planning Room"}
           </div>
-          <div className="truncate text-xs text-slate-400">
-            Room ID: <span className="font-mono">{roomId}</span>
+          <div className="truncate text-xs text-ivory-dim">
+            Room ID: <span className="font-mono text-gold-soft">{roomId}</span>
           </div>
         </div>
       </div>
@@ -134,8 +137,8 @@ export function RoomControls({
       <div className="flex flex-wrap items-center gap-2">
         {canRename &&
           (editing ? (
-            <div className="flex items-center gap-1 rounded-lg border border-accent/60 bg-slate-900/80 px-2 py-1">
-              <UserCircle2 className="h-3.5 w-3.5 shrink-0 text-accent" />
+            <div className="flex items-center gap-1 rounded-lg border border-gold/60 bg-wood-dark/90 px-2 py-1">
+              <UserCircle2 className="h-3.5 w-3.5 shrink-0 text-gold-soft" />
               <input
                 ref={inputRef}
                 value={draft}
@@ -152,13 +155,13 @@ export function RoomControls({
                 disabled={savingName}
                 maxLength={32}
                 placeholder="Nama kamu"
-                className="w-28 bg-transparent px-1 text-xs font-medium text-white outline-none placeholder:text-slate-500 sm:w-36"
+                className="w-28 bg-transparent px-1 text-xs font-medium text-ivory-soft outline-none placeholder:text-ivory-dim/70 sm:w-36"
               />
               <button
                 type="button"
                 onClick={() => void commitRename()}
                 disabled={savingName}
-                className="rounded p-0.5 text-emerald-400 transition hover:bg-emerald-500/10 disabled:opacity-50"
+                className="rounded p-0.5 text-emerald-300 transition hover:bg-emerald-500/15 disabled:opacity-50"
                 title="Simpan"
                 aria-label="Simpan nama"
               >
@@ -168,7 +171,7 @@ export function RoomControls({
                 type="button"
                 onClick={cancelRename}
                 disabled={savingName}
-                className="rounded p-0.5 text-slate-400 transition hover:bg-slate-700/60 hover:text-white disabled:opacity-50"
+                className="rounded p-0.5 text-ivory-dim transition hover:bg-wood/60 hover:text-ivory-soft disabled:opacity-50"
                 title="Batal"
                 aria-label="Batal mengubah nama"
               >
@@ -179,7 +182,7 @@ export function RoomControls({
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="group inline-flex max-w-[160px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition hover:border-accent hover:text-accent sm:max-w-[200px] sm:px-3"
+              className="group inline-flex max-w-[160px] items-center gap-1.5 rounded-lg border border-gold/40 bg-wood-dark/70 px-2.5 py-1.5 text-xs font-medium text-ivory transition hover:border-gold hover:text-gold-soft sm:max-w-[200px] sm:px-3"
               title="Ganti nama"
             >
               <UserCircle2 className="h-3.5 w-3.5 shrink-0" />
@@ -189,7 +192,7 @@ export function RoomControls({
           ))}
 
         {nameError && (
-          <span className="text-[11px] text-red-400">{nameError}</span>
+          <span className="text-[11px] text-red-300">{nameError}</span>
         )}
 
         {canReact && onEmoji && (
@@ -200,8 +203,8 @@ export function RoomControls({
           type="button"
           onClick={toggleMute}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition hover:border-accent hover:text-accent sm:px-3",
-            muted && "border-amber-500/60 text-amber-300",
+            pillBase,
+            muted && "border-gold text-gold-soft",
           )}
           title={muted ? "Suara dimatikan" : "Matikan suara"}
           aria-label={muted ? "Aktifkan suara" : "Matikan suara"}
@@ -217,8 +220,8 @@ export function RoomControls({
         <button
           onClick={copyLink}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition hover:border-accent hover:text-accent sm:px-3",
-            copied && "border-emerald-500 text-emerald-400",
+            pillBase,
+            copied && "border-emerald-400 text-emerald-300",
           )}
         >
           {copied ? (
@@ -236,7 +239,7 @@ export function RoomControls({
         </button>
         <button
           onClick={onLeave}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs font-medium text-slate-300 transition hover:border-red-500 hover:text-red-400 sm:px-3"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-wood-dark/70 px-2.5 py-1.5 text-xs font-medium text-ivory transition hover:border-red-400 hover:text-red-300 sm:px-3"
           title="Leave room"
         >
           <LogOut className="h-3.5 w-3.5" />

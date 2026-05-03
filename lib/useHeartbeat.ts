@@ -6,7 +6,7 @@ import { getSupabase } from "./supabase";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const CLEANUP_INTERVAL_MS = 20_000;
-const STALE_AFTER_SECONDS = 45;
+export const STALE_AFTER_SECONDS = 45;
 
 /**
  * Periodically refresh `last_seen` for the local player so other clients can

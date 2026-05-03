@@ -24,7 +24,7 @@ export function EmojiBlastLayer({ floaters }: Props) {
           <span className="text-4xl drop-shadow-lg sm:text-5xl">
             {f.emoji}
           </span>
-          <span className="mt-1 max-w-[140px] truncate rounded-full bg-slate-900/80 px-2 py-0.5 text-[10px] font-medium text-slate-200 ring-1 ring-slate-700/60">
+          <span className="mt-1 max-w-[140px] truncate rounded-full bg-wood-dark/85 px-2 py-0.5 text-[10px] font-medium text-ivory ring-1 ring-gold/50">
             {f.from}
           </span>
         </div>

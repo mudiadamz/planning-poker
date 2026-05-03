@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { cn } from "@/lib/cn";
 import type { Player } from "@/lib/types";
 import { average, isNumericVote } from "@/lib/decks";
 
@@ -48,54 +49,70 @@ export function Stats({ players, revealed }: Props) {
 
   const totalVotes = tallies.reduce((sum, t) => sum + t.count, 0);
 
+  // Casino chip colors cycled per tally row so the bars feel colorful.
+  const CHIP_COLORS = [
+    "bg-gold",
+    "bg-cardRed",
+    "bg-emerald-500",
+    "bg-sky-400",
+    "bg-violet-500",
+    "bg-orange-400",
+  ];
+
   return (
-    <div className="flex w-full flex-col gap-4 rounded-2xl border border-slate-700/60 bg-slate-900/60 p-4 shadow-inner sm:p-5">
+    <div className="wood-frame flex w-full flex-col gap-4 rounded-2xl p-4 sm:p-5">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+        <h3 className="font-serif text-xs font-bold uppercase tracking-[0.2em] text-gold-soft">
           Vote Summary
         </h3>
         {allAgree && (
-          <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+          <span className="rounded-full border border-gold/60 bg-gold/15 px-2.5 py-0.5 font-serif text-[10px] font-bold uppercase tracking-wider text-gold-soft">
             Agreement
           </span>
         )}
       </div>
 
-      <div className="flex items-end justify-between gap-4 rounded-xl bg-slate-950/40 px-4 py-3">
+      <div className="flex items-end justify-between gap-4 rounded-xl border border-gold/30 bg-felt-dark/60 px-4 py-3">
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-slate-400">
+          <div className="text-[10px] uppercase tracking-wide text-ivory-dim">
             Average
           </div>
-          <div className="text-2xl font-bold text-white">
+          <div className="font-serif text-2xl font-bold text-gold-soft">
             {avg !== null ? avg.toFixed(1) : "—"}
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wide text-slate-400">
+          <div className="text-[10px] uppercase tracking-wide text-ivory-dim">
             Total
           </div>
-          <div className="text-2xl font-bold text-white">{totalVotes}</div>
+          <div className="font-serif text-2xl font-bold text-ivory-soft">
+            {totalVotes}
+          </div>
         </div>
       </div>
 
       {tallies.length === 0 ? (
-        <p className="text-sm text-slate-400">Tidak ada vote.</p>
+        <p className="text-sm text-ivory-dim">Tidak ada vote.</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {tallies.map((t) => {
+          {tallies.map((t, idx) => {
             const widthPct = maxCount > 0 ? (t.count / maxCount) * 100 : 0;
+            const chipColor = CHIP_COLORS[idx % CHIP_COLORS.length];
             return (
               <li key={t.value} className="flex items-center gap-3">
-                <div className="flex h-9 w-7 flex-shrink-0 items-center justify-center rounded border border-accent/60 bg-slate-900 text-sm font-bold text-accent">
+                <div className="flex h-9 w-7 flex-shrink-0 items-center justify-center rounded border-2 border-gold/60 bg-ivory-soft font-serif text-sm font-bold text-cardBlack">
                   {t.value}
                 </div>
-                <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-slate-800">
+                <div className="relative h-2.5 flex-1 overflow-hidden rounded-full border border-gold/30 bg-felt-dark/80">
                   <div
-                    className="h-full rounded-full bg-accent transition-all"
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      chipColor,
+                    )}
                     style={{ width: `${Math.max(widthPct, 6)}%` }}
                   />
                 </div>
-                <div className="w-14 text-right text-[11px] uppercase tracking-wide text-slate-400">
+                <div className="w-14 text-right text-[11px] uppercase tracking-wide text-ivory-dim">
                   {t.count} {t.count === 1 ? "vote" : "votes"}
                 </div>
               </li>

@@ -46,7 +46,7 @@ export function PlayerSeat({
             <button
               type="button"
               onClick={() => onTransferOwnership(player.id)}
-              className="flex h-5 w-5 items-center justify-center rounded-full border border-amber-400/60 bg-slate-900 text-amber-300 shadow transition hover:bg-amber-400 hover:text-slate-900"
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-gold/60 bg-wood-dark text-gold-soft shadow transition hover:bg-gold hover:text-wood-dark"
               title={`Jadikan ${player.name} owner room`}
               aria-label={`Jadikan ${player.name} owner room`}
             >
@@ -57,7 +57,7 @@ export function PlayerSeat({
             <button
               type="button"
               onClick={() => onKick(player.id)}
-              className="flex h-5 w-5 items-center justify-center rounded-full border border-red-500/60 bg-slate-900 text-red-300 shadow transition hover:bg-red-500 hover:text-white"
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-red-400/60 bg-wood-dark text-red-300 shadow transition hover:bg-red-500 hover:text-white"
               title={`Keluarkan ${player.name}`}
               aria-label={`Keluarkan ${player.name}`}
             >
@@ -68,8 +68,8 @@ export function PlayerSeat({
       )}
       <div
         className={cn(
-          "flex max-w-[100px] items-center justify-center gap-1 truncate text-center text-xs font-medium sm:max-w-[140px] sm:text-sm",
-          isMe ? "text-accent" : "text-slate-200",
+          "flex max-w-[100px] items-center justify-center gap-1 truncate text-center font-serif text-xs font-medium sm:max-w-[140px] sm:text-sm",
+          isMe ? "text-gold-soft" : "text-ivory",
         )}
         title={
           isOwner ? `${player.name} (room owner)` : player.name
@@ -77,13 +77,13 @@ export function PlayerSeat({
       >
         {isOwner && (
           <Crown
-            className="h-3 w-3 flex-shrink-0 text-amber-400 sm:h-3.5 sm:w-3.5"
+            className="h-3 w-3 flex-shrink-0 text-gold-soft sm:h-3.5 sm:w-3.5"
             aria-label="Room owner"
           />
         )}
         <span className="truncate">{player.name}</span>
         {isMe && (
-          <span className="text-[10px] text-slate-500 sm:text-xs">
+          <span className="text-[10px] text-ivory-dim sm:text-xs">
             (you)
           </span>
         )}

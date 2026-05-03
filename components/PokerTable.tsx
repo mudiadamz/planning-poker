@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { cn } from "@/lib/cn";
 import type { Player, Room } from "@/lib/types";
 import { isNumericVote } from "@/lib/decks";
 import { PlayerSeat } from "./PlayerSeat";
@@ -148,13 +149,31 @@ export function PokerTable({
           ))}
         </div>
 
-        <div className="relative flex h-32 min-w-[180px] flex-1 items-center justify-center rounded-3xl border border-accent/30 bg-gradient-to-b from-[#1d3a63] to-[#13314f] px-3 text-center shadow-inner sm:h-44 sm:min-w-[280px]">
+        <div
+          className="relative flex h-32 min-w-[180px] flex-1 items-center justify-center rounded-[40px] border-[10px] border-wood px-3 text-center sm:h-44 sm:min-w-[280px] sm:rounded-[60px] sm:border-[14px]"
+          style={{
+            backgroundImage:
+              "radial-gradient(ellipse at center, #1a6f55 0%, #0d4f3c 55%, #08382a 100%), repeating-radial-gradient(circle at 50% 50%, rgba(0,0,0,0.05) 0, rgba(0,0,0,0.05) 1px, transparent 1px, transparent 4px)",
+            backgroundBlendMode: "multiply",
+            boxShadow:
+              "inset 0 0 0 3px #d4af37, inset 0 0 30px rgba(0,0,0,0.55), 0 12px 30px -10px rgba(0,0,0,0.6)",
+          }}
+        >
+          {/* Decorative gold pin-rail dots around the rim, like brass studs. */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-[30px] sm:rounded-[46px]"
+            style={{
+              background:
+                "radial-gradient(circle at 50% 50%, transparent 96%, rgba(212,175,55,0.0) 100%)",
+            }}
+          />
           {isOwner ? (
             room.revealed ? (
               <button
                 onClick={onReset}
                 disabled={busy}
-                className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white shadow transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60 sm:px-5 sm:py-2.5 sm:text-sm"
+                className="brass-button rounded-full px-4 py-2 font-serif text-xs font-bold uppercase tracking-wider transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60 sm:px-6 sm:py-2.5 sm:text-sm"
               >
                 Start new voting
               </button>
@@ -162,7 +181,13 @@ export function PokerTable({
               <button
                 onClick={onReveal}
                 disabled={busy || !anyVoted}
-                className="rounded-lg bg-slate-700/80 px-3 py-2 text-xs font-semibold text-white shadow transition enabled:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60 sm:px-5 sm:py-2.5 sm:text-sm"
+                className={cn(
+                  "rounded-full px-4 py-2 font-serif text-xs font-bold uppercase tracking-wider transition sm:px-6 sm:py-2.5 sm:text-sm",
+                  anyVoted
+                    ? "brass-button enabled:hover:scale-105"
+                    : "border border-gold/40 bg-felt-dark/60 text-ivory-dim",
+                  "disabled:cursor-not-allowed disabled:opacity-60",
+                )}
                 title={
                   anyVoted
                     ? allVoted
@@ -175,7 +200,7 @@ export function PokerTable({
               </button>
             )
           ) : (
-            <p className="text-xs font-medium text-slate-300 sm:text-sm">
+            <p className="font-serif text-xs font-medium uppercase tracking-wider text-ivory/85 sm:text-sm">
               {room.revealed
                 ? "Menunggu owner memulai voting baru..."
                 : anyVoted

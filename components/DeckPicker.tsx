@@ -63,7 +63,7 @@ export function DeckPicker({ current, disabled, onChange }: Props) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-wood-dark/70 px-3 py-1.5 text-xs font-medium text-ivory transition hover:border-gold hover:text-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Settings2 className="h-3.5 w-3.5" />
         {activeId
@@ -78,8 +78,8 @@ export function DeckPicker({ current, disabled, onChange }: Props) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border border-slate-700/60 bg-slate-900/95 p-2 shadow-2xl backdrop-blur">
-          <div className="mb-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        <div className="absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border-2 border-gold/60 bg-wood-dark/95 p-2 shadow-2xl backdrop-blur">
+          <div className="mb-1 px-2 py-1 font-serif text-[10px] font-semibold uppercase tracking-wider text-gold-soft">
             Deck preset
           </div>
           {DECK_PRESETS.map((p) => (
@@ -89,43 +89,45 @@ export function DeckPicker({ current, disabled, onChange }: Props) {
               onClick={() => applyPreset(p.id)}
               disabled={saving}
               className={cn(
-                "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition hover:bg-slate-800/80",
-                activeId === p.id && "bg-accent/15 text-accent",
+                "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition hover:bg-gold/10",
+                activeId === p.id
+                  ? "bg-gold/20 text-gold-soft"
+                  : "text-ivory",
               )}
             >
               <span className="font-medium">{p.label}</span>
-              <span className="truncate text-xs text-slate-400">
+              <span className="truncate text-xs text-ivory-dim">
                 {p.cards.slice(0, 5).join(" · ")}
                 {p.cards.length > 5 ? "…" : ""}
               </span>
             </button>
           ))}
 
-          <div className="my-1 h-px bg-slate-700/60" />
+          <div className="my-1 h-px bg-gold/30" />
 
           {customMode ? (
             <form onSubmit={applyCustom} className="space-y-2 px-1 pb-1">
-              <label className="block px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              <label className="block px-1 font-serif text-[10px] font-semibold uppercase tracking-wider text-gold-soft">
                 Custom (comma-separated)
               </label>
               <input
                 value={customText}
                 onChange={(e) => setCustomText(e.target.value)}
                 placeholder="1, 2, 3, 5, 8, 13, ?"
-                className="w-full rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1.5 text-sm outline-none focus:border-accent"
+                className="w-full rounded-md border border-gold/40 bg-ivory-soft/95 px-2 py-1.5 text-sm text-wood-dark outline-none focus:border-gold"
               />
               <div className="flex gap-2">
                 <button
                   type="submit"
                   disabled={saving}
-                  className="flex-1 rounded-md bg-accent px-2 py-1.5 text-xs font-semibold text-white hover:bg-accent-soft disabled:opacity-60"
+                  className="brass-button flex-1 rounded-md px-2 py-1.5 text-xs font-bold uppercase tracking-wider disabled:opacity-60"
                 >
                   Save
                 </button>
                 <button
                   type="button"
                   onClick={() => setCustomMode(false)}
-                  className="rounded-md border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                  className="rounded-md border border-gold/40 px-2 py-1.5 text-xs text-ivory hover:bg-gold/10"
                 >
                   Cancel
                 </button>
@@ -138,7 +140,7 @@ export function DeckPicker({ current, disabled, onChange }: Props) {
                 setCustomText(current.join(", "));
                 setCustomMode(true);
               }}
-              className="w-full rounded-md px-2 py-1.5 text-left text-sm text-slate-300 transition hover:bg-slate-800/80"
+              className="w-full rounded-md px-2 py-1.5 text-left text-sm text-ivory transition hover:bg-gold/10"
             >
               Custom…
             </button>

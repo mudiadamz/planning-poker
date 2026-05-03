@@ -10,10 +10,12 @@ import { useIdentity } from "@/lib/store";
 import { DEFAULT_DECK } from "@/lib/decks";
 import {
   cleanupStalePlayers,
+  STALE_AFTER_SECONDS,
   useHeartbeat,
   useStalePlayerCleanup,
 } from "@/lib/useHeartbeat";
 import type { Player, Room } from "@/lib/types";
+import { InactiveDialog } from "@/components/InactiveDialog";
 import { JoinDialog } from "@/components/JoinDialog";
 import { RoomControls } from "@/components/RoomControls";
 import { PokerTable } from "@/components/PokerTable";
@@ -42,12 +44,32 @@ export default function RoomPage({ params }: { params: Params }) {
   const [error, setError] = useState<string | null>(null);
   const [floaters, setFloaters] = useState<EmojiFloater[]>([]);
   const [leaving, setLeaving] = useState(false);
+  const [inactiveKicked, setInactiveKicked] = useState(false);
+  const [inactiveName, setInactiveName] = useState<string | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const playerIdRef = useRef<string | null>(null);
+  // Track the last time the tab was confirmed visible so we can distinguish
+  // "row deleted while I was away" (inactive auto-cleanup) from "row deleted
+  // while I was watching" (owner kick).
+  const lastActiveAtRef = useRef<number>(Date.now());
   useEffect(() => {
     playerIdRef.current = playerId;
   }, [playerId]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (document.visibilityState === "visible") {
+      lastActiveAtRef.current = Date.now();
+    }
+    function onVisible() {
+      if (document.visibilityState === "visible") {
+        lastActiveAtRef.current = Date.now();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   const spawnFloater = useCallback((emoji: string, from: string) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -191,16 +213,29 @@ export default function RoomPage({ params }: { params: Params }) {
     };
   }, [room, roomId, spawnFloater]);
 
-  // Verify our locally-stored player still exists in DB; if not, we were
-  // either kicked by the owner or removed for being stale. Show a notice
-  // and redirect home rather than the rejoin dialog.
+  // Verify our locally-stored player still exists in DB. If not, two cases:
+  //   (a) Tab was inactive too long → auto-cleanup deleted us. Show in-room
+  //       InactiveDialog with a Rejoin button; keep the URL and room view.
+  //   (b) Otherwise (tab was active when row vanished) → owner kicked us.
+  //       Keep the legacy alert + redirect-home flow.
   useEffect(() => {
-    if (loading || !room || !playerId || leaving) return;
+    if (loading || !room || !playerId || leaving || inactiveKicked) return;
     const stillThere = players.some((p) => p.id === playerId);
     if (!stillThere && players.length > 0) {
       const timer = window.setTimeout(() => {
         const exists = players.some((p) => p.id === playerId);
         if (exists) return;
+        const now = Date.now();
+        const sinceActive = now - lastActiveAtRef.current;
+        const looksInactive =
+          (typeof document !== "undefined" &&
+            document.visibilityState === "hidden") ||
+          sinceActive > STALE_AFTER_SECONDS * 1000;
+        if (looksInactive) {
+          setInactiveName(playerName ?? null);
+          setInactiveKicked(true);
+          return;
+        }
         setLeaving(true);
         clear();
         if (typeof window !== "undefined") {
@@ -210,10 +245,20 @@ export default function RoomPage({ params }: { params: Params }) {
       }, 1500);
       return () => window.clearTimeout(timer);
     }
-  }, [loading, room, players, playerId, leaving, clear, router]);
+  }, [
+    loading,
+    room,
+    players,
+    playerId,
+    leaving,
+    inactiveKicked,
+    playerName,
+    clear,
+    router,
+  ]);
 
-  useHeartbeat(playerId, roomId);
-  useStalePlayerCleanup(playerId ? roomId : null);
+  useHeartbeat(inactiveKicked ? null : playerId, roomId);
+  useStalePlayerCleanup(!inactiveKicked && playerId ? roomId : null);
 
   // Cleanup on tab close / unload
   useEffect(() => {
@@ -250,7 +295,8 @@ export default function RoomPage({ params }: { params: Params }) {
 
   const isOwner = !!owner && !!me && owner.id === me.id;
 
-  const needsJoin = !loading && !notFound && room && !me && !leaving;
+  const needsJoin =
+    !loading && !notFound && room && !me && !leaving && !inactiveKicked;
 
   const handleJoin = useCallback(
     async (name: string) => {
@@ -272,6 +318,23 @@ export default function RoomPage({ params }: { params: Params }) {
     },
     [roomId, setIdentity],
   );
+
+  const handleRejoinAfterInactive = useCallback(async () => {
+    const name = inactiveName ?? playerName;
+    if (!name) return;
+    clear();
+    await handleJoin(name);
+    setInactiveKicked(false);
+    setInactiveName(null);
+    lastActiveAtRef.current = Date.now();
+  }, [inactiveName, playerName, clear, handleJoin]);
+
+  const handleLeaveAfterInactive = useCallback(() => {
+    setInactiveKicked(false);
+    setInactiveName(null);
+    clear();
+    router.push("/");
+  }, [clear, router]);
 
   const handleVote = useCallback(
     async (value: string) => {
@@ -473,14 +536,16 @@ export default function RoomPage({ params }: { params: Params }) {
   if (notFound) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-4 text-center">
-        <h1 className="text-2xl font-bold">Room tidak ditemukan</h1>
-        <p className="text-slate-400">
-          Room <span className="font-mono">{roomId}</span> tidak ada atau sudah
-          dihapus.
+        <h1 className="font-serif text-2xl font-bold text-ivory-soft">
+          Room tidak ditemukan
+        </h1>
+        <p className="text-ivory-dim">
+          Room <span className="font-mono text-gold-soft">{roomId}</span> tidak
+          ada atau sudah dihapus.
         </p>
         <button
           onClick={() => router.push("/")}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-soft"
+          className="brass-button rounded-lg px-4 py-2 font-serif text-sm font-bold uppercase tracking-wider"
         >
           Kembali ke beranda
         </button>
@@ -491,7 +556,7 @@ export default function RoomPage({ params }: { params: Params }) {
   if (loading || !room) {
     return (
       <main className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-accent" />
+        <Loader2 className="h-6 w-6 animate-spin text-gold-soft" />
       </main>
     );
   }
@@ -544,7 +609,7 @@ export default function RoomPage({ params }: { params: Params }) {
         )}
       </section>
 
-      <div className="border-t border-slate-800/60 bg-slate-950/60 px-3 py-4 sm:px-6">
+      <div className="wood border-t-2 border-gold/60 px-3 py-4 shadow-[inset_0_2px_0_rgba(212,175,55,0.25)] sm:px-6">
         <VoteDeck
           deck={deck}
           selected={me?.vote ?? null}
@@ -560,14 +625,23 @@ export default function RoomPage({ params }: { params: Params }) {
         />
       )}
 
+      {inactiveKicked && (
+        <InactiveDialog
+          roomName={room.name}
+          playerName={inactiveName ?? playerName}
+          onRejoin={handleRejoinAfterInactive}
+          onLeave={handleLeaveAfterInactive}
+        />
+      )}
+
       <EmojiBlastLayer floaters={floaters} />
 
       {error && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300 shadow-lg">
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-red-400/60 bg-wood-dark/95 px-4 py-2 text-sm text-red-200 shadow-lg ring-1 ring-red-500/40">
           {error}
           <button
             onClick={() => setError(null)}
-            className="ml-3 text-red-200 hover:text-white"
+            className="ml-3 text-red-300 hover:text-ivory-soft"
           >
             ×
           </button>
