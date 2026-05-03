@@ -60,7 +60,7 @@ export function Stats({ players, revealed }: Props) {
   ];
 
   return (
-    <div className="wood-frame flex w-full flex-col gap-4 rounded-2xl p-4 sm:p-5">
+    <div className="wood-frame animate-pop flex w-full flex-col gap-4 rounded-2xl p-4 sm:p-5">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-serif text-xs font-bold uppercase tracking-[0.2em] text-gold-soft">
           Vote Summary

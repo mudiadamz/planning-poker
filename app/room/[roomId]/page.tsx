@@ -587,6 +587,15 @@ export default function RoomPage({ params }: { params: Params }) {
       </div>
 
       <section className="flex flex-1 flex-col items-center justify-center gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-8 lg:flex-row lg:items-center lg:justify-center lg:gap-8">
+        {/* Left spacer mirrors the Stats sidebar width so the table stays
+            perfectly centered on desktop, regardless of whether votes are
+            revealed. Without it, the table visibly jumps left when Stats
+            appears. */}
+        <div
+          aria-hidden
+          className="hidden lg:block lg:w-80 lg:flex-shrink-0"
+        />
+
         <div className="flex w-full flex-1 items-center justify-center">
           <PokerTable
             room={room}
@@ -602,11 +611,16 @@ export default function RoomPage({ params }: { params: Params }) {
           />
         </div>
 
-        {room.revealed && (
-          <aside className="w-full lg:w-80 lg:flex-shrink-0">
-            <Stats players={players} revealed={room.revealed} />
-          </aside>
-        )}
+        {/* On lg the slot is always reserved (empty when not revealed) so
+            the table doesn't shift. On mobile we still hide it entirely
+            until reveal so we don't waste vertical space. */}
+        <aside
+          className={`w-full lg:w-80 lg:flex-shrink-0${
+            !room.revealed ? " hidden lg:block" : ""
+          }`}
+        >
+          {room.revealed && <Stats players={players} revealed={room.revealed} />}
+        </aside>
       </section>
 
       <div className="wood border-t-2 border-gold/60 px-3 py-4 shadow-[inset_0_2px_0_rgba(212,175,55,0.25)] sm:px-6">
