@@ -654,19 +654,16 @@ export default function RoomPage({ params }: { params: Params }) {
         />
       </div>
 
-      <section className="flex flex-1 flex-col items-center justify-center gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-8 lg:flex-row lg:items-center lg:justify-center lg:gap-8">
-        {/* Left pane — Story Point guide when the active preset has one.
-            On lg the slot is always reserved (empty when no guide) so the
-            table stays perfectly centered whether the guide is shown or
-            not. On mobile we hide it entirely until needed so we don't
-            waste vertical space. */}
-        <aside
-          className={`w-full lg:w-80 lg:flex-shrink-0${
-            !guide ? " hidden lg:block" : ""
-          }`}
-        >
-          {guide && <StoryPointGuide guide={guide} cards={deck} />}
-        </aside>
+      <section className="flex flex-1 flex-col items-center justify-center gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-8">
+        {/* On smaller screens we stack the guide above the table so it
+            stays accessible. On lg+ the same panel is rendered as a
+            floating overlay below — see the <aside> blocks at the end of
+            this <main>. */}
+        {guide && (
+          <div className="w-full lg:hidden">
+            <StoryPointGuide guide={guide} cards={deck} />
+          </div>
+        )}
 
         <div className="flex w-full flex-1 items-center justify-center">
           <PokerTable
@@ -683,16 +680,11 @@ export default function RoomPage({ params }: { params: Params }) {
           />
         </div>
 
-        {/* On lg the slot is always reserved (empty when not revealed) so
-            the table doesn't shift. On mobile we still hide it entirely
-            until reveal so we don't waste vertical space. */}
-        <aside
-          className={`w-full lg:w-80 lg:flex-shrink-0${
-            !room.revealed ? " hidden lg:block" : ""
-          }`}
-        >
-          {room.revealed && <Stats players={players} revealed={room.revealed} />}
-        </aside>
+        {room.revealed && (
+          <div className="w-full lg:hidden">
+            <Stats players={players} revealed={room.revealed} />
+          </div>
+        )}
       </section>
 
       <div className="wood border-t-2 border-gold/60 px-3 py-4 shadow-[inset_0_2px_0_rgba(212,175,55,0.25)] sm:px-6">
@@ -718,6 +710,29 @@ export default function RoomPage({ params }: { params: Params }) {
           onRejoin={handleRejoinAfterInactive}
           onLeave={handleLeaveAfterInactive}
         />
+      )}
+
+      {/* Floating side panels — lg+ only. They sit on top of the felt
+          on the left/right edges so the table can use the full width
+          without ever being squeezed. The wrapper is pointer-events:none
+          so clicks elsewhere on the felt pass through; only the panel
+          itself is interactive. Heights are clamped under the viewport
+          (header + bottom deck), and each panel can be collapsed to its
+          title bar via the chevron. */}
+      {guide && (
+        <aside className="pointer-events-none fixed left-3 top-1/2 z-20 hidden -translate-y-1/2 lg:block">
+          <div className="pointer-events-auto flex max-h-[calc(100vh-12rem)] w-64 flex-col">
+            <StoryPointGuide guide={guide} cards={deck} />
+          </div>
+        </aside>
+      )}
+
+      {room.revealed && (
+        <aside className="pointer-events-none fixed right-3 top-1/2 z-20 hidden -translate-y-1/2 lg:block">
+          <div className="pointer-events-auto flex max-h-[calc(100vh-12rem)] w-64 flex-col">
+            <Stats players={players} revealed={room.revealed} />
+          </div>
+        </aside>
       )}
 
       <EmojiBlastLayer floaters={floaters} />
