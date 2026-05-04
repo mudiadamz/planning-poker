@@ -60,50 +60,50 @@ export function Stats({ players, revealed }: Props) {
   ];
 
   return (
-    <div className="wood-frame animate-pop flex w-full flex-col gap-4 rounded-2xl p-4 sm:p-5">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-serif text-xs font-bold uppercase tracking-[0.2em] text-gold-soft">
+    <div className="wood-frame animate-pop flex w-full flex-col gap-2 overflow-hidden rounded-xl p-2.5">
+      <div className="flex items-center justify-between gap-2 px-0.5">
+        <h3 className="font-serif text-[11px] font-bold uppercase tracking-[0.2em] text-gold-soft">
           Vote Summary
         </h3>
         {allAgree && (
-          <span className="rounded-full border border-gold/60 bg-gold/15 px-2.5 py-0.5 font-serif text-[10px] font-bold uppercase tracking-wider text-gold-soft">
+          <span className="rounded-full border border-gold/60 bg-gold/15 px-2 py-0.5 font-serif text-[9px] font-bold uppercase tracking-wider text-gold-soft">
             Agreement
           </span>
         )}
       </div>
 
-      <div className="flex items-end justify-between gap-4 rounded-xl border border-gold/30 bg-felt-dark/60 px-4 py-3">
+      <div className="flex items-end justify-between gap-3 rounded-lg border border-gold/30 bg-felt-dark/60 px-3 py-2">
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-ivory-dim">
+          <div className="text-[9px] uppercase tracking-wide text-ivory-dim">
             Average
           </div>
-          <div className="font-serif text-2xl font-bold text-gold-soft">
+          <div className="font-serif text-xl font-bold leading-tight text-gold-soft">
             {avg !== null ? avg.toFixed(1) : "—"}
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wide text-ivory-dim">
+          <div className="text-[9px] uppercase tracking-wide text-ivory-dim">
             Total
           </div>
-          <div className="font-serif text-2xl font-bold text-ivory-soft">
+          <div className="font-serif text-xl font-bold leading-tight text-ivory-soft">
             {totalVotes}
           </div>
         </div>
       </div>
 
       {tallies.length === 0 ? (
-        <p className="text-sm text-ivory-dim">Tidak ada vote.</p>
+        <p className="px-1 py-0.5 text-xs text-ivory-dim">Tidak ada vote.</p>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex max-h-[40vh] flex-col gap-1.5 overflow-y-auto pr-0.5 lg:max-h-[calc(100vh-22rem)]">
           {tallies.map((t, idx) => {
             const widthPct = maxCount > 0 ? (t.count / maxCount) * 100 : 0;
             const chipColor = CHIP_COLORS[idx % CHIP_COLORS.length];
             return (
-              <li key={t.value} className="flex items-center gap-3">
-                <div className="flex h-9 w-7 flex-shrink-0 items-center justify-center rounded border-2 border-gold/60 bg-ivory-soft font-serif text-sm font-bold text-cardBlack">
+              <li key={t.value} className="flex items-center gap-2">
+                <div className="flex h-8 w-6 flex-shrink-0 items-center justify-center rounded border-2 border-gold/60 bg-ivory-soft font-serif text-xs font-bold text-cardBlack">
                   {t.value}
                 </div>
-                <div className="relative h-2.5 flex-1 overflow-hidden rounded-full border border-gold/30 bg-felt-dark/80">
+                <div className="relative h-2 flex-1 overflow-hidden rounded-full border border-gold/30 bg-felt-dark/80">
                   <div
                     className={cn(
                       "h-full rounded-full transition-all",
@@ -112,8 +112,8 @@ export function Stats({ players, revealed }: Props) {
                     style={{ width: `${Math.max(widthPct, 6)}%` }}
                   />
                 </div>
-                <div className="w-14 text-right text-[11px] uppercase tracking-wide text-ivory-dim">
-                  {t.count} {t.count === 1 ? "vote" : "votes"}
+                <div className="w-10 text-right text-[10px] uppercase tracking-wide text-ivory-dim">
+                  {t.count}
                 </div>
               </li>
             );
