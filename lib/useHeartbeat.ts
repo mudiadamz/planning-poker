@@ -3,14 +3,20 @@
 import { useEffect } from "react";
 
 import { getSupabase } from "./supabase";
+import { STALE_AFTER_SECONDS } from "./presenceConstants";
+
+export { STALE_AFTER_SECONDS };
 
 // Heartbeat tuning. We deliberately keep users "active" for a long time so
 // people don't get auto-kicked just because they switched browser tabs to a
 // meeting / docs / Slack for a few minutes. Browsers throttle setInterval on
 // hidden tabs anyway, so even a generous interval is cheap.
 const HEARTBEAT_INTERVAL_MS = 30_000;
-const CLEANUP_INTERVAL_MS = 60_000;
-export const STALE_AFTER_SECONDS = 15 * 60; // 15 minutes
+// Cleanup runs more aggressively than the heartbeat because the close-tab
+// "soft leave" flow (see /api/leave) deliberately backdates `last_seen` so
+// that a real close becomes stale within ~10s. We want the sweep to pick
+// those up promptly so seats don't linger as ghosts.
+const CLEANUP_INTERVAL_MS = 10_000;
 
 /**
  * Periodically refresh `last_seen` for the local player so other clients can

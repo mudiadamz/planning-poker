@@ -31,14 +31,6 @@ import { playSound } from "@/lib/sounds";
 
 type Params = Promise<{ roomId: string }>;
 
-// Auto-rejoin window: how long after a self-leave (pagehide → beacon
-// → row deleted) the same tab can silently re-claim its seat. A page
-// refresh completes well within this window; a tab close opens a
-// fresh sessionStorage on a future visit so the marker is absent
-// regardless of how short or long this is.
-const REJOIN_GRACE_MS = 30_000;
-const REJOIN_KEY = (roomId: string) => `pp-rejoin-${roomId}`;
-
 export default function RoomPage({ params }: { params: Params }) {
   const { roomId } = use(params);
   const router = useRouter();
@@ -313,25 +305,12 @@ export default function RoomPage({ params }: { params: Params }) {
       if (firedOnce) return;
       firedOnce = true;
       try {
-        // Drop a self-leave marker in sessionStorage BEFORE sending the
-        // beacon. sessionStorage survives a page refresh in the same tab,
-        // so a refreshed tab can detect "I removed my own row a second
-        // ago" and silently re-claim the seat — see the auto-rejoin
-        // effect below. A real tab close opens a new sessionStorage on
-        // a future visit, so the marker is correctly absent.
-        if (typeof window !== "undefined") {
-          // Read latest identity from the store (the closure may have
-          // captured a stale name if the user renamed mid-session).
-          const latest = useIdentity.getState();
-          sessionStorage.setItem(
-            REJOIN_KEY(roomId),
-            JSON.stringify({
-              playerId: latest.playerId ?? playerId,
-              name: latest.playerName ?? null,
-              ts: Date.now(),
-            }),
-          );
-        }
+        // The /api/leave route is a SOFT leave: it backdates `last_seen`
+        // so the row stays present for a few seconds (the soft-leave
+        // grace) and is then swept by the periodic stale-cleanup unless
+        // the same tab re-mounts and heartbeats. Refresh therefore
+        // looks like a no-op to other clients; only a real close
+        // (where no heartbeat ever comes back) actually clears the seat.
         const payload = JSON.stringify({ roomId, playerId });
         const blob = new Blob([payload], { type: "application/json" });
         navigator.sendBeacon?.("/api/leave", blob);
@@ -347,81 +326,6 @@ export default function RoomPage({ params }: { params: Params }) {
       window.removeEventListener("beforeunload", fireLeave);
     };
   }, [playerId, roomId]);
-
-  // Auto-rejoin after a tab refresh. The pagehide handler above sets a
-  // self-leave marker in sessionStorage and beacons /api/leave, which
-  // deletes our player row. When the same tab re-renders the room (i.e.
-  // the user just hit refresh), we land here without a row in the
-  // players list — but the marker tells us this was a refresh, not a
-  // kick / inactive cleanup, so we silently re-insert the row with the
-  // SAME player id. To other clients this looks like a brief blip; to
-  // the local user, the refresh is essentially a no-op.
-  //
-  // Guarded so we only attempt once per page life — a failed re-insert
-  // falls through to the existing kick / inactive flow.
-  const rejoinAttemptedRef = useRef(false);
-  useEffect(() => {
-    if (loading || !room || !roomId) return;
-    if (!playerId || !playerName) return;
-    if (leaving || inactiveKicked) return;
-    if (typeof window === "undefined") return;
-
-    // Already seated → make sure the marker is cleaned up.
-    if (players.some((p) => p.id === playerId)) {
-      sessionStorage.removeItem(REJOIN_KEY(roomId));
-      return;
-    }
-
-    if (rejoinAttemptedRef.current) return;
-
-    const raw = sessionStorage.getItem(REJOIN_KEY(roomId));
-    if (!raw) return;
-
-    let marker: { playerId?: string; name?: string; ts?: number } | null = null;
-    try {
-      marker = JSON.parse(raw);
-    } catch {
-      marker = null;
-    }
-    if (!marker || marker.playerId !== playerId) return;
-    if (!marker.ts || Date.now() - marker.ts > REJOIN_GRACE_MS) return;
-
-    rejoinAttemptedRef.current = true;
-    sessionStorage.removeItem(REJOIN_KEY(roomId));
-
-    void (async () => {
-      const supabase = getSupabase();
-      const name = marker?.name ?? playerName;
-      const { data, error: insertErr } = await supabase
-        .from("players")
-        .upsert(
-          { id: playerId, room_id: roomId, name, last_seen: new Date().toISOString() },
-          { onConflict: "id" },
-        )
-        .select("*")
-        .single();
-      if (insertErr) {
-        console.error("auto-rejoin failed", insertErr);
-        // Allow another attempt on the next mount (e.g. a second refresh).
-        rejoinAttemptedRef.current = false;
-        return;
-      }
-      if (data) {
-        setPlayers((prev) =>
-          prev.some((p) => p.id === data.id) ? prev : [...prev, data],
-        );
-      }
-    })();
-  }, [
-    loading,
-    room,
-    roomId,
-    playerId,
-    playerName,
-    players,
-    leaving,
-    inactiveKicked,
-  ]);
 
   const me = useMemo(
     () => players.find((p) => p.id === playerId) ?? null,
