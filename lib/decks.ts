@@ -2,13 +2,29 @@ export type DeckPreset = {
   id: string;
   label: string;
   cards: string[];
+  /**
+   * Optional per-card guide text. When set, the room shows a side panel
+   * describing what each value typically represents — useful for teams
+   * adopting story-point estimation that aren't all on the same page yet.
+   */
+  guide?: Record<string, string>;
 };
 
 export const DECK_PRESETS: DeckPreset[] = [
   {
-    id: "fibonacci",
-    label: "Fibonacci",
+    id: "story-point",
+    label: "Story Point",
     cards: ["1", "2", "3", "5", "8", "13", "21", "?"],
+    guide: {
+      "1": "Sangat kecil — perubahan trivial, typo, atau config.",
+      "2": "Kecil — task simpel, jelas, tanpa unknown.",
+      "3": "Sederhana — fitur kecil pada satu area, beberapa jam kerja.",
+      "5": "Sedang — multi-bagian, butuh testing, kira-kira 1 hari.",
+      "8": "Besar — kompleks, lintas area, perlu sedikit desain.",
+      "13": "Sangat besar — pertimbangkan dipecah jadi lebih kecil.",
+      "21": "Epic — wajib dipecah jadi story yang lebih kecil.",
+      "?": "Belum jelas — perlu diskusi atau riset dulu.",
+    },
   },
   {
     id: "modified-fibonacci",
@@ -28,6 +44,20 @@ export const DECK_PRESETS: DeckPreset[] = [
 ];
 
 export const DEFAULT_DECK: string[] = DECK_PRESETS[0].cards;
+
+/**
+ * Returns the matching deck preset for a given deck array, by exact card
+ * sequence match. Used by the room to decide whether to show a side guide
+ * panel (e.g. story-point descriptions).
+ */
+export function findPreset(deck: string[] | null | undefined): DeckPreset | null {
+  if (!deck) return null;
+  const key = JSON.stringify(deck);
+  for (const p of DECK_PRESETS) {
+    if (JSON.stringify(p.cards) === key) return p;
+  }
+  return null;
+}
 
 const NON_NUMERIC = new Set(["?", "XS", "S", "M", "L", "XL", "XXL", "☕"]);
 

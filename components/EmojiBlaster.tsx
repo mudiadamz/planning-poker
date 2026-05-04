@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Smile } from "lucide-react";
+import { Smile, Users } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 
@@ -28,13 +28,21 @@ export const EMOJIS = [
   "🐢",
 ] as const;
 
+type Player = { id: string; name: string };
+
 type Props = {
   disabled?: boolean;
-  onPick: (emoji: string) => void;
+  /** Optional list of players to choose from as a reaction target. */
+  players?: Player[];
+  /** Local player's id, used to mark "(kamu)" in the target list. */
+  meId?: string | null;
+  /** Called with the chosen emoji and an optional target player id (null = everyone). */
+  onPick: (emoji: string, targetId: string | null) => void;
 };
 
-export function EmojiBlaster({ disabled, onPick }: Props) {
+export function EmojiBlaster({ disabled, players, meId, onPick }: Props) {
   const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Close popover when clicking outside or pressing Escape.
@@ -55,10 +63,24 @@ export function EmojiBlaster({ disabled, onPick }: Props) {
     };
   }, [open]);
 
+  // If the targeted player leaves the room, fall back to "everyone" so we
+  // never broadcast at a ghost id.
+  useEffect(() => {
+    if (target && players && !players.some((p) => p.id === target)) {
+      setTarget(null);
+    }
+  }, [target, players]);
+
   function pick(emoji: string) {
-    onPick(emoji);
+    onPick(emoji, target);
     // Keep open for spam-clicking — closes on outside click / Esc.
   }
+
+  const targetLabel = target
+    ? players?.find((p) => p.id === target)?.name ?? "Pemain"
+    : "Semua";
+
+  const hasOthers = !!players && players.length > 0;
 
   return (
     <div ref={containerRef} className="relative">
@@ -82,22 +104,74 @@ export function EmojiBlaster({ disabled, onPick }: Props) {
       {open && (
         <div
           role="menu"
-          className="animate-pop absolute right-0 top-full z-40 mt-2 grid w-[224px] grid-cols-5 gap-1 rounded-xl border-2 border-gold/60 bg-wood-dark/95 p-2 shadow-2xl backdrop-blur"
+          className="animate-pop absolute right-0 top-full z-40 mt-2 w-[260px] rounded-xl border-2 border-gold/60 bg-wood-dark/95 p-2 shadow-2xl backdrop-blur"
         >
-          {EMOJIS.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              onClick={() => pick(emoji)}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-xl transition hover:scale-110 hover:bg-gold/15 active:scale-95"
-              title={`Lempar ${emoji}`}
-              aria-label={`Lempar ${emoji}`}
-            >
-              {emoji}
-            </button>
-          ))}
+          {hasOthers && (
+            <div className="mb-2 border-b border-gold/30 pb-2">
+              <div className="mb-1 flex items-center gap-1 px-1 font-serif text-[10px] font-bold uppercase tracking-[0.18em] text-gold-soft">
+                <Users className="h-3 w-3" />
+                Tujuan: <span className="text-ivory">{targetLabel}</span>
+              </div>
+              <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto px-0.5 pt-1">
+                <TargetChip
+                  active={target === null}
+                  label="Semua"
+                  onClick={() => setTarget(null)}
+                />
+                {players!.map((p) => (
+                  <TargetChip
+                    key={p.id}
+                    active={target === p.id}
+                    label={p.id === meId ? `${p.name} (kamu)` : p.name}
+                    onClick={() => setTarget(p.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-5 gap-1">
+            {EMOJIS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => pick(emoji)}
+                className="flex h-9 w-9 items-center justify-center rounded-md text-xl transition hover:scale-110 hover:bg-gold/15 active:scale-95"
+                title={`Lempar ${emoji}${target ? " ke " + targetLabel : ""}`}
+                aria-label={`Lempar ${emoji}`}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+function TargetChip({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "max-w-[120px] truncate rounded-full border px-2 py-0.5 text-[11px] font-medium transition",
+        active
+          ? "border-gold bg-gold/20 text-gold-soft"
+          : "border-gold/40 text-ivory hover:border-gold hover:text-gold-soft",
+      )}
+      title={label}
+    >
+      {label}
+    </button>
   );
 }

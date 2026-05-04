@@ -24,7 +24,11 @@ type Props = {
   canRename?: boolean;
   onRename?: (name: string) => Promise<void> | void;
   canReact?: boolean;
-  onEmoji?: (emoji: string) => void;
+  /** Players that can be picked as the target of an emoji reaction. */
+  reactTargets?: Array<{ id: string; name: string }>;
+  /** Local player id, so the target picker can mark it as "(kamu)". */
+  meId?: string | null;
+  onEmoji?: (emoji: string, targetId: string | null) => void;
   onLeave: () => void;
 };
 
@@ -35,6 +39,8 @@ export function RoomControls({
   canRename,
   onRename,
   canReact,
+  reactTargets,
+  meId,
   onEmoji,
   onLeave,
 }: Props) {
@@ -196,7 +202,11 @@ export function RoomControls({
         )}
 
         {canReact && onEmoji && (
-          <EmojiBlaster onPick={onEmoji} />
+          <EmojiBlaster
+            onPick={onEmoji}
+            players={reactTargets}
+            meId={meId}
+          />
         )}
 
         <button

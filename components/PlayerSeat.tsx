@@ -33,7 +33,10 @@ export function PlayerSeat({
   const showActions = canManage && !isMe && !isOwner;
 
   return (
-    <div className="group relative flex flex-col items-center gap-1.5 sm:gap-2">
+    <div
+      data-player-id={player.id}
+      className="group relative flex flex-col items-center gap-1.5 sm:gap-2"
+    >
       <Card
         value={player.vote}
         revealed={revealed}

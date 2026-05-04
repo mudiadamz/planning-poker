@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react";
 
 import { getSupabase } from "@/lib/supabase";
 import { useIdentity } from "@/lib/store";
-import { DEFAULT_DECK } from "@/lib/decks";
+import { DEFAULT_DECK, findPreset } from "@/lib/decks";
 import {
   cleanupStalePlayers,
   STALE_AFTER_SECONDS,
@@ -21,6 +21,7 @@ import { RoomControls } from "@/components/RoomControls";
 import { PokerTable } from "@/components/PokerTable";
 import { VoteDeck } from "@/components/VoteDeck";
 import { Stats } from "@/components/Stats";
+import { StoryPointGuide } from "@/components/StoryPointGuide";
 import { DeckPicker } from "@/components/DeckPicker";
 import {
   EmojiBlastLayer,
@@ -71,14 +72,34 @@ export default function RoomPage({ params }: { params: Params }) {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
-  const spawnFloater = useCallback((emoji: string, from: string) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const x = 0.15 + Math.random() * 0.7; // 15%..85% of viewport width
-    setFloaters((prev) => [...prev, { id, emoji, from, x }]);
-    window.setTimeout(() => {
-      setFloaters((prev) => prev.filter((f) => f.id !== id));
-    }, 3100);
-  }, []);
+  const spawnFloater = useCallback(
+    (
+      emoji: string,
+      from: string,
+      to: string | null,
+      fromPlayerId: string | null,
+    ) => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const x = 0.15 + Math.random() * 0.7; // 15%..85% of viewport width
+      setFloaters((prev) => [
+        ...prev,
+        {
+          id,
+          emoji,
+          from,
+          x,
+          to: to ?? undefined,
+          fromPlayerId: fromPlayerId ?? undefined,
+        },
+      ]);
+      // Targeted reactions are 1.8s, untargeted ~3s — keep the longer
+      // sweep so untargeted ones have time to leave the screen.
+      window.setTimeout(() => {
+        setFloaters((prev) => prev.filter((f) => f.id !== id));
+      }, 3100);
+    },
+    [],
+  );
 
   // Initial load: room + players, plus stale cleanup.
   useEffect(() => {
@@ -186,10 +207,20 @@ export default function RoomPage({ params }: { params: Params }) {
       )
       .on("broadcast", { event: "emoji" }, (msg) => {
         const payload = msg.payload as
-          | { emoji?: string; from?: string }
+          | {
+              emoji?: string;
+              from?: string;
+              to?: string;
+              from_player_id?: string;
+            }
           | undefined;
         if (!payload?.emoji) return;
-        spawnFloater(payload.emoji, payload.from || "Anon");
+        spawnFloater(
+          payload.emoji,
+          payload.from || "Anon",
+          payload.to ?? null,
+          payload.from_player_id ?? null,
+        );
       })
       .on("broadcast", { event: "leave" }, (msg) => {
         // Instant heads-up that someone left, in case the postgres_changes
@@ -415,19 +446,25 @@ export default function RoomPage({ params }: { params: Params }) {
   );
 
   const handleEmoji = useCallback(
-    (emoji: string) => {
+    (emoji: string, targetId: string | null) => {
       const channel = channelRef.current;
       const fromName = me?.name ?? playerName ?? "Anon";
+      const fromId = playerId ?? null;
       // Show locally immediately (Supabase broadcast does not echo to sender).
-      spawnFloater(emoji, fromName);
+      spawnFloater(emoji, fromName, targetId, fromId);
       if (!channel) return;
       void channel.send({
         type: "broadcast",
         event: "emoji",
-        payload: { emoji, from: fromName },
+        payload: {
+          emoji,
+          from: fromName,
+          from_player_id: fromId ?? undefined,
+          to: targetId ?? undefined,
+        },
       });
     },
-    [me, playerName, spawnFloater],
+    [me, playerName, playerId, spawnFloater],
   );
 
   const handleTransferOwnership = useCallback(
@@ -570,6 +607,13 @@ export default function RoomPage({ params }: { params: Params }) {
   const deck = Array.isArray(room.deck) && room.deck.length > 0
     ? room.deck
     : DEFAULT_DECK;
+  const activePreset = findPreset(deck);
+  const guide = activePreset?.guide ?? null;
+
+  // The local player can react at anyone except themself by default; we
+  // still include themself in the picker because some teams "self-shout"
+  // their own enthusiasm — harmless and occasionally funny.
+  const reactTargets = players.map((p) => ({ id: p.id, name: p.name }));
 
   return (
     <main className="flex min-h-screen flex-col">
@@ -580,6 +624,8 @@ export default function RoomPage({ params }: { params: Params }) {
         canRename={!!me}
         onRename={handleRename}
         canReact={!!me}
+        reactTargets={reactTargets}
+        meId={playerId}
         onEmoji={handleEmoji}
         onLeave={handleLeave}
       />
@@ -593,14 +639,18 @@ export default function RoomPage({ params }: { params: Params }) {
       </div>
 
       <section className="flex flex-1 flex-col items-center justify-center gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-8 lg:flex-row lg:items-center lg:justify-center lg:gap-8">
-        {/* Left spacer mirrors the Stats sidebar width so the table stays
-            perfectly centered on desktop, regardless of whether votes are
-            revealed. Without it, the table visibly jumps left when Stats
-            appears. */}
-        <div
-          aria-hidden
-          className="hidden lg:block lg:w-80 lg:flex-shrink-0"
-        />
+        {/* Left pane — Story Point guide when the active preset has one.
+            On lg the slot is always reserved (empty when no guide) so the
+            table stays perfectly centered whether the guide is shown or
+            not. On mobile we hide it entirely until needed so we don't
+            waste vertical space. */}
+        <aside
+          className={`w-full lg:w-80 lg:flex-shrink-0${
+            !guide ? " hidden lg:block" : ""
+          }`}
+        >
+          {guide && <StoryPointGuide guide={guide} cards={deck} />}
+        </aside>
 
         <div className="flex w-full flex-1 items-center justify-center">
           <PokerTable
