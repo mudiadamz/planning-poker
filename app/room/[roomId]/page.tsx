@@ -31,6 +31,14 @@ import { playSound } from "@/lib/sounds";
 
 type Params = Promise<{ roomId: string }>;
 
+// Auto-rejoin window: how long after a self-leave (pagehide → beacon
+// → row deleted) the same tab can silently re-claim its seat. A page
+// refresh completes well within this window; a tab close opens a
+// fresh sessionStorage on a future visit so the marker is absent
+// regardless of how short or long this is.
+const REJOIN_GRACE_MS = 30_000;
+const REJOIN_KEY = (roomId: string) => `pp-rejoin-${roomId}`;
+
 export default function RoomPage({ params }: { params: Params }) {
   const { roomId } = use(params);
   const router = useRouter();
@@ -305,6 +313,25 @@ export default function RoomPage({ params }: { params: Params }) {
       if (firedOnce) return;
       firedOnce = true;
       try {
+        // Drop a self-leave marker in sessionStorage BEFORE sending the
+        // beacon. sessionStorage survives a page refresh in the same tab,
+        // so a refreshed tab can detect "I removed my own row a second
+        // ago" and silently re-claim the seat — see the auto-rejoin
+        // effect below. A real tab close opens a new sessionStorage on
+        // a future visit, so the marker is correctly absent.
+        if (typeof window !== "undefined") {
+          // Read latest identity from the store (the closure may have
+          // captured a stale name if the user renamed mid-session).
+          const latest = useIdentity.getState();
+          sessionStorage.setItem(
+            REJOIN_KEY(roomId),
+            JSON.stringify({
+              playerId: latest.playerId ?? playerId,
+              name: latest.playerName ?? null,
+              ts: Date.now(),
+            }),
+          );
+        }
         const payload = JSON.stringify({ roomId, playerId });
         const blob = new Blob([payload], { type: "application/json" });
         navigator.sendBeacon?.("/api/leave", blob);
@@ -320,6 +347,81 @@ export default function RoomPage({ params }: { params: Params }) {
       window.removeEventListener("beforeunload", fireLeave);
     };
   }, [playerId, roomId]);
+
+  // Auto-rejoin after a tab refresh. The pagehide handler above sets a
+  // self-leave marker in sessionStorage and beacons /api/leave, which
+  // deletes our player row. When the same tab re-renders the room (i.e.
+  // the user just hit refresh), we land here without a row in the
+  // players list — but the marker tells us this was a refresh, not a
+  // kick / inactive cleanup, so we silently re-insert the row with the
+  // SAME player id. To other clients this looks like a brief blip; to
+  // the local user, the refresh is essentially a no-op.
+  //
+  // Guarded so we only attempt once per page life — a failed re-insert
+  // falls through to the existing kick / inactive flow.
+  const rejoinAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (loading || !room || !roomId) return;
+    if (!playerId || !playerName) return;
+    if (leaving || inactiveKicked) return;
+    if (typeof window === "undefined") return;
+
+    // Already seated → make sure the marker is cleaned up.
+    if (players.some((p) => p.id === playerId)) {
+      sessionStorage.removeItem(REJOIN_KEY(roomId));
+      return;
+    }
+
+    if (rejoinAttemptedRef.current) return;
+
+    const raw = sessionStorage.getItem(REJOIN_KEY(roomId));
+    if (!raw) return;
+
+    let marker: { playerId?: string; name?: string; ts?: number } | null = null;
+    try {
+      marker = JSON.parse(raw);
+    } catch {
+      marker = null;
+    }
+    if (!marker || marker.playerId !== playerId) return;
+    if (!marker.ts || Date.now() - marker.ts > REJOIN_GRACE_MS) return;
+
+    rejoinAttemptedRef.current = true;
+    sessionStorage.removeItem(REJOIN_KEY(roomId));
+
+    void (async () => {
+      const supabase = getSupabase();
+      const name = marker?.name ?? playerName;
+      const { data, error: insertErr } = await supabase
+        .from("players")
+        .upsert(
+          { id: playerId, room_id: roomId, name, last_seen: new Date().toISOString() },
+          { onConflict: "id" },
+        )
+        .select("*")
+        .single();
+      if (insertErr) {
+        console.error("auto-rejoin failed", insertErr);
+        // Allow another attempt on the next mount (e.g. a second refresh).
+        rejoinAttemptedRef.current = false;
+        return;
+      }
+      if (data) {
+        setPlayers((prev) =>
+          prev.some((p) => p.id === data.id) ? prev : [...prev, data],
+        );
+      }
+    })();
+  }, [
+    loading,
+    room,
+    roomId,
+    playerId,
+    playerName,
+    players,
+    leaving,
+    inactiveKicked,
+  ]);
 
   const me = useMemo(
     () => players.find((p) => p.id === playerId) ?? null,
@@ -656,16 +758,20 @@ export default function RoomPage({ params }: { params: Params }) {
 
       <section className="flex flex-1 flex-col items-center justify-center gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-8">
         {/* On smaller screens we stack the guide above the table so it
-            stays accessible. On lg+ the same panel is rendered as a
+            stays accessible. On xl+ the same panel is rendered as a
             floating overlay below — see the <aside> blocks at the end of
             this <main>. */}
         {guide && (
-          <div className="w-full lg:hidden">
+          <div className="w-full xl:hidden">
             <StoryPointGuide guide={guide} cards={deck} />
           </div>
         )}
 
-        <div className="flex w-full flex-1 items-center justify-center">
+        {/* On wide screens we cap the table width so it stays well
+            inside the felt and never gets covered by the floating side
+            panels at xl+. On smaller viewports the table can use its
+            full natural width. */}
+        <div className="mx-auto flex w-full flex-1 items-center justify-center xl:max-w-2xl 2xl:max-w-3xl">
           <PokerTable
             room={room}
             players={players}
@@ -681,7 +787,7 @@ export default function RoomPage({ params }: { params: Params }) {
         </div>
 
         {room.revealed && (
-          <div className="w-full lg:hidden">
+          <div className="w-full xl:hidden">
             <Stats players={players} revealed={room.revealed} />
           </div>
         )}
@@ -712,24 +818,25 @@ export default function RoomPage({ params }: { params: Params }) {
         />
       )}
 
-      {/* Floating side panels — lg+ only. They sit on top of the felt
-          on the left/right edges so the table can use the full width
-          without ever being squeezed. The wrapper is pointer-events:none
-          so clicks elsewhere on the felt pass through; only the panel
-          itself is interactive. Heights are clamped under the viewport
-          (header + bottom deck), and each panel can be collapsed to its
-          title bar via the chevron. */}
+      {/* Floating side panels — xl+ only. They sit on top of the felt
+          on the left/right edges, with a capped width so they never
+          overlap the table (which itself is capped narrower at xl+).
+          `pointer-events-none` on the wrapper lets clicks on the felt
+          around the panel pass through; only the panel body itself is
+          interactive. Heights are clamped under the viewport (header +
+          bottom deck) and each panel can be collapsed to its title bar
+          via the chevron. */}
       {guide && (
-        <aside className="pointer-events-none fixed left-3 top-1/2 z-20 hidden -translate-y-1/2 lg:block">
-          <div className="pointer-events-auto flex max-h-[calc(100vh-12rem)] w-64 flex-col">
+        <aside className="pointer-events-none fixed left-3 top-1/2 z-20 hidden -translate-y-1/2 xl:block">
+          <div className="pointer-events-auto flex max-h-[calc(100vh-12rem)] w-60 flex-col 2xl:w-64">
             <StoryPointGuide guide={guide} cards={deck} />
           </div>
         </aside>
       )}
 
       {room.revealed && (
-        <aside className="pointer-events-none fixed right-3 top-1/2 z-20 hidden -translate-y-1/2 lg:block">
-          <div className="pointer-events-auto flex max-h-[calc(100vh-12rem)] w-64 flex-col">
+        <aside className="pointer-events-none fixed right-3 top-1/2 z-20 hidden -translate-y-1/2 xl:block">
+          <div className="pointer-events-auto flex max-h-[calc(100vh-12rem)] w-60 flex-col 2xl:w-64">
             <Stats players={players} revealed={room.revealed} />
           </div>
         </aside>
