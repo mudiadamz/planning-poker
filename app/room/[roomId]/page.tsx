@@ -286,17 +286,40 @@ export default function RoomPage({ params }: { params: Params }) {
   useHeartbeat(inactiveKicked ? null : playerId, roomId);
   useStalePlayerCleanup(!inactiveKicked && playerId ? roomId : null);
 
-  // Cleanup on tab close / unload
+  // Cleanup on tab close / window close. We use `navigator.sendBeacon`
+  // because regular fetch / supabase delete promises get aborted when the
+  // page unloads, which is exactly why ghost seats stayed at the table
+  // for up to STALE_AFTER_SECONDS after a real disconnect. Beacons are
+  // queued by the browser and guaranteed to be sent. We listen on
+  // `pagehide` (most reliable, fires on tab close + mobile bfcache) and
+  // also `beforeunload` as a desktop belt-and-suspenders.
+  //
+  // We deliberately do NOT remove the player on `visibilitychange ->
+  // hidden`, because that also fires when the user just switches tabs —
+  // those users should stay seated.
   useEffect(() => {
-    if (!playerId) return;
-    function onBeforeUnload() {
-      const supabase = getSupabase();
-      // Best-effort: don't await, browser may not finish.
-      void supabase.from("players").delete().eq("id", playerId!);
+    if (!playerId || !roomId) return;
+
+    let firedOnce = false;
+    function fireLeave() {
+      if (firedOnce) return;
+      firedOnce = true;
+      try {
+        const payload = JSON.stringify({ roomId, playerId });
+        const blob = new Blob([payload], { type: "application/json" });
+        navigator.sendBeacon?.("/api/leave", blob);
+      } catch {
+        // Ignore — last-resort cleanup will be the periodic stale sweep.
+      }
     }
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [playerId]);
+
+    window.addEventListener("pagehide", fireLeave);
+    window.addEventListener("beforeunload", fireLeave);
+    return () => {
+      window.removeEventListener("pagehide", fireLeave);
+      window.removeEventListener("beforeunload", fireLeave);
+    };
+  }, [playerId, roomId]);
 
   const me = useMemo(
     () => players.find((p) => p.id === playerId) ?? null,
