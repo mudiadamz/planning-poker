@@ -73,14 +73,12 @@ export default function RoomPage({ params }: { params: Params }) {
   }, []);
 
   const spawnFloater = useCallback(
-    (
-      emoji: string,
-      from: string,
-      to: string | null,
-      fromPlayerId: string | null,
-    ) => {
+    (emoji: string, from: string, to: string | null) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const x = 0.15 + Math.random() * 0.7; // 15%..85% of viewport width
+      // Used by the blast layer as a deterministic horizontal jitter seed
+      // around the table center, so a burst of reactions doesn't pile on a
+      // single pixel.
+      const x = Math.random();
       setFloaters((prev) => [
         ...prev,
         {
@@ -89,7 +87,6 @@ export default function RoomPage({ params }: { params: Params }) {
           from,
           x,
           to: to ?? undefined,
-          fromPlayerId: fromPlayerId ?? undefined,
         },
       ]);
       // Targeted reactions are 1.8s, untargeted ~3s — keep the longer
@@ -211,7 +208,6 @@ export default function RoomPage({ params }: { params: Params }) {
               emoji?: string;
               from?: string;
               to?: string;
-              from_player_id?: string;
             }
           | undefined;
         if (!payload?.emoji) return;
@@ -219,7 +215,6 @@ export default function RoomPage({ params }: { params: Params }) {
           payload.emoji,
           payload.from || "Anon",
           payload.to ?? null,
-          payload.from_player_id ?? null,
         );
       })
       .on("broadcast", { event: "leave" }, (msg) => {
@@ -449,9 +444,8 @@ export default function RoomPage({ params }: { params: Params }) {
     (emoji: string, targetId: string | null) => {
       const channel = channelRef.current;
       const fromName = me?.name ?? playerName ?? "Anon";
-      const fromId = playerId ?? null;
       // Show locally immediately (Supabase broadcast does not echo to sender).
-      spawnFloater(emoji, fromName, targetId, fromId);
+      spawnFloater(emoji, fromName, targetId);
       if (!channel) return;
       void channel.send({
         type: "broadcast",
@@ -459,12 +453,11 @@ export default function RoomPage({ params }: { params: Params }) {
         payload: {
           emoji,
           from: fromName,
-          from_player_id: fromId ?? undefined,
           to: targetId ?? undefined,
         },
       });
     },
-    [me, playerName, playerId, spawnFloater],
+    [me, playerName, spawnFloater],
   );
 
   const handleTransferOwnership = useCallback(

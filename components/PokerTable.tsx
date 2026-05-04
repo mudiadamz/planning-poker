@@ -150,6 +150,7 @@ export function PokerTable({
         </div>
 
         <div
+          data-table-center
           className="relative flex h-32 min-w-[180px] flex-1 items-center justify-center rounded-[40px] border-[10px] border-wood px-3 text-center sm:h-44 sm:min-w-[280px] sm:rounded-[60px] sm:border-[14px]"
           style={{
             backgroundImage:

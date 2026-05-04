@@ -63,13 +63,19 @@ export function EmojiBlaster({ disabled, players, meId, onPick }: Props) {
     };
   }, [open]);
 
-  // If the targeted player leaves the room, fall back to "everyone" so we
-  // never broadcast at a ghost id.
+  // Filter sender out — you can't aim a reaction at yourself, only at
+  // other players in the room.
+  const targetablePlayers = (players ?? []).filter((p) => p.id !== meId);
+
+  // If the targeted player leaves the room (or somehow turns into self),
+  // fall back to "everyone" so we never broadcast at a ghost / self id.
   useEffect(() => {
-    if (target && players && !players.some((p) => p.id === target)) {
-      setTarget(null);
-    }
-  }, [target, players]);
+    if (!target) return;
+    const stillValid = (players ?? []).some(
+      (p) => p.id === target && p.id !== meId,
+    );
+    if (!stillValid) setTarget(null);
+  }, [target, players, meId]);
 
   function pick(emoji: string) {
     onPick(emoji, target);
@@ -77,10 +83,10 @@ export function EmojiBlaster({ disabled, players, meId, onPick }: Props) {
   }
 
   const targetLabel = target
-    ? players?.find((p) => p.id === target)?.name ?? "Pemain"
+    ? targetablePlayers.find((p) => p.id === target)?.name ?? "Pemain"
     : "Semua";
 
-  const hasOthers = !!players && players.length > 0;
+  const hasOthers = targetablePlayers.length > 0;
 
   return (
     <div ref={containerRef} className="relative">
@@ -118,11 +124,11 @@ export function EmojiBlaster({ disabled, players, meId, onPick }: Props) {
                   label="Semua"
                   onClick={() => setTarget(null)}
                 />
-                {players!.map((p) => (
+                {targetablePlayers.map((p) => (
                   <TargetChip
                     key={p.id}
                     active={target === p.id}
-                    label={p.id === meId ? `${p.name} (kamu)` : p.name}
+                    label={p.name}
                     onClick={() => setTarget(p.id)}
                   />
                 ))}

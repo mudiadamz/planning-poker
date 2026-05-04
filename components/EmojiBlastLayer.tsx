@@ -1,19 +1,19 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type EmojiFloater = {
   id: string;
   emoji: string;
+  /** Sender display name. Kept for analytics / future tooltips; not
+   *  rendered next to the floating emoji. */
   from: string;
-  /** 0..1 — horizontal position as a fraction of viewport width. Used as
-   *  the start fallback for untargeted/anonymous reactions. */
+  /** 0..1 — used as the horizontal jitter seed inside the table so a
+   *  burst of reactions doesn't pile on the exact same point. */
   x: number;
   /** Optional target player id. When set, the emoji animates from the
-   *  sender's seat (or bottom of the screen) toward the target's seat. */
+   *  table center toward the target's seat instead of floating up. */
   to?: string;
-  /** Optional sender player id, used to find the seat element to fly from. */
-  fromPlayerId?: string;
 };
 
 type Props = {
@@ -34,27 +34,61 @@ export function EmojiBlastLayer({ floaters }: Props) {
   );
 }
 
+/** Compute the on-screen center of the poker table, with a sensible
+ *  bottom-of-viewport fallback for cases where the table isn't mounted yet. */
+function getTableCenter(): { x: number; y: number; width: number; height: number } {
+  const el = document.querySelector("[data-table-center]");
+  if (!el) {
+    return {
+      x: window.innerWidth / 2,
+      y: window.innerHeight - 120,
+      width: 280,
+      height: 160,
+    };
+  }
+  const rect = el.getBoundingClientRect();
+  return {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
 function UntargetedFloater({ floater }: { floater: EmojiFloater }) {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  useEffect(() => {
+    const center = getTableCenter();
+    // Use the floater's stored x as a deterministic horizontal jitter seed
+    // (-50%..+50% of a capped table-width) so multiple simultaneous reactions
+    // don't stack on the exact same pixel.
+    const spread = Math.min(center.width * 0.7, 220);
+    const jitterX = (floater.x - 0.5) * spread;
+    setPos({ left: center.x + jitterX, top: center.y });
+  }, [floater]);
+
+  if (!pos) return null;
+
   return (
     <div
-      className="animate-float-up absolute bottom-16 flex select-none flex-col items-center"
-      style={{ left: `${floater.x * 100}%`, transform: "translateX(-50%)" }}
+      className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
+      style={{ left: pos.left, top: pos.top }}
     >
-      <span className="text-4xl drop-shadow-lg sm:text-5xl">
-        {floater.emoji}
-      </span>
-      <span className="mt-1 max-w-[140px] truncate rounded-full bg-wood-dark/85 px-2 py-0.5 text-[10px] font-medium text-ivory ring-1 ring-gold/50">
-        {floater.from}
-      </span>
+      <div className="animate-float-up select-none">
+        <span className="text-4xl drop-shadow-lg sm:text-5xl">
+          {floater.emoji}
+        </span>
+      </div>
     </div>
   );
 }
 
 /**
- * Targeted reactions visibly fly from the sender's seat (or the bottom of
- * the screen if the sender is unknown) and converge on the target's seat,
- * then shrink and fade as if absorbed by them. Uses the Web Animations API
- * because the start/end coordinates are computed from live DOM rects.
+ * Targeted reactions visibly fly from the center of the table along a slight
+ * upward arc and converge on the target's seat, then shrink and fade as if
+ * absorbed by them. Uses the Web Animations API because the start/end
+ * coordinates are computed from live DOM rects.
  */
 function TargetedFloater({ floater }: { floater: EmojiFloater }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -69,17 +103,9 @@ function TargetedFloater({ floater }: { floater: EmojiFloater }) {
     if (!target) return;
 
     const targetRect = target.getBoundingClientRect();
-    const fromEl = floater.fromPlayerId
-      ? document.querySelector(`[data-player-id="${floater.fromPlayerId}"]`)
-      : null;
-    const fromRect = fromEl?.getBoundingClientRect() ?? null;
-
-    const startX = fromRect
-      ? fromRect.left + fromRect.width / 2
-      : floater.x * window.innerWidth;
-    const startY = fromRect
-      ? fromRect.top + fromRect.height / 2
-      : window.innerHeight - 100;
+    const center = getTableCenter();
+    const startX = center.x;
+    const startY = center.y;
     const endX = targetRect.left + targetRect.width / 2;
     const endY = targetRect.top + targetRect.height / 2;
 
@@ -133,12 +159,9 @@ function TargetedFloater({ floater }: { floater: EmojiFloater }) {
       {/* Inner wrapper offsets the visual center to the (x,y) the outer
           element is translated to. Animating only the outer keeps things
           simple and GPU-friendly. */}
-      <div className="-translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
+      <div className="-translate-x-1/2 -translate-y-1/2">
         <span className="text-4xl drop-shadow-lg sm:text-5xl">
           {floater.emoji}
-        </span>
-        <span className="mt-1 max-w-[140px] truncate rounded-full bg-wood-dark/85 px-2 py-0.5 text-[10px] font-medium text-ivory ring-1 ring-gold/50">
-          {floater.from}
         </span>
       </div>
     </div>
