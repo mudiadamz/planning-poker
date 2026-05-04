@@ -4,13 +4,18 @@ import { useEffect } from "react";
 
 import { getSupabase } from "./supabase";
 
-const HEARTBEAT_INTERVAL_MS = 10_000;
-const CLEANUP_INTERVAL_MS = 20_000;
-export const STALE_AFTER_SECONDS = 45;
+// Heartbeat tuning. We deliberately keep users "active" for a long time so
+// people don't get auto-kicked just because they switched browser tabs to a
+// meeting / docs / Slack for a few minutes. Browsers throttle setInterval on
+// hidden tabs anyway, so even a generous interval is cheap.
+const HEARTBEAT_INTERVAL_MS = 30_000;
+const CLEANUP_INTERVAL_MS = 60_000;
+export const STALE_AFTER_SECONDS = 15 * 60; // 15 minutes
 
 /**
  * Periodically refresh `last_seen` for the local player so other clients can
- * detect them as online. Runs only while the tab is visible.
+ * detect them as online. Pings even when the tab is hidden (subject to the
+ * browser's background throttling) so backgrounded tabs stay alive longer.
  *
  * Returns nothing - side-effect only.
  */
@@ -36,11 +41,12 @@ export function useHeartbeat(playerId: string | null, roomId: string | null) {
 
     void ping();
     const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void ping();
-      }
+      void ping();
     }, HEARTBEAT_INTERVAL_MS);
 
+    // Always re-ping the moment the tab becomes visible again, so a user
+    // returning from a long context-switch is immediately "fresh" without
+    // having to wait for the next interval tick.
     function onVisible() {
       if (document.visibilityState === "visible") void ping();
     }
@@ -73,9 +79,11 @@ export async function cleanupStalePlayers(
 }
 
 /**
- * Periodic cleanup loop. Every 20s any client in the room sweeps players
- * whose last_seen is older than 45s — so disconnected players (closed laptop,
- * lost wifi, etc.) automatically disappear from the table for everyone.
+ * Periodic cleanup loop. Every CLEANUP_INTERVAL_MS any client in the room
+ * sweeps players whose last_seen is older than STALE_AFTER_SECONDS — so
+ * truly disconnected players (closed laptop, lost wifi, etc.) eventually
+ * disappear from the table for everyone, while users who briefly background
+ * the tab stay seated.
  */
 export function useStalePlayerCleanup(roomId: string | null) {
   useEffect(() => {

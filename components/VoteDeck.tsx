@@ -33,18 +33,34 @@ export function VoteDeck({ deck, selected, disabled, onPick }: Props) {
               type="button"
               onClick={() => !disabled && onPick(card)}
               disabled={disabled}
-              style={{ transform: `rotate(${tilt}deg)` }}
+              style={{
+                transform: isSelected
+                  ? `translateY(-1.25rem) scale(1.18) rotate(0deg)`
+                  : `rotate(${tilt}deg)`,
+              }}
               className={cn(
-                "group relative h-16 w-11 rounded-lg border-2 bg-ivory-soft font-serif font-bold shadow-[0_3px_8px_rgba(0,0,0,0.35)] transition-all sm:h-24 sm:w-16",
+                "group relative h-16 w-11 rounded-lg border-2 font-serif font-bold transition-all duration-200 sm:h-24 sm:w-16",
                 "enabled:hover:-translate-y-2 enabled:hover:rotate-0 enabled:hover:shadow-[0_8px_20px_rgba(0,0,0,0.45)] sm:enabled:hover:-translate-y-3",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 isSelected
-                  ? "-translate-y-3 border-gold shadow-[0_0_0_3px_rgba(212,175,55,0.55),0_10px_22px_rgba(0,0,0,0.5)] sm:-translate-y-4"
-                  : "border-gold/50 hover:border-gold",
+                  ? "z-10 border-gold bg-gradient-to-b from-ivory-soft via-ivory to-gold-soft/60 shadow-[0_0_0_4px_rgba(212,175,55,0.85),0_0_28px_rgba(245,215,110,0.65),0_18px_30px_rgba(0,0,0,0.55)] ring-2 ring-gold ring-offset-2 ring-offset-felt-dark"
+                  : "border-gold/50 bg-ivory-soft shadow-[0_3px_8px_rgba(0,0,0,0.35)] hover:border-gold",
+                !isSelected &&
+                  selected !== null &&
+                  "opacity-70 hover:opacity-100",
               )}
               aria-pressed={isSelected}
               title={`Vote ${card}`}
             >
+              {/* "Pilihan" ribbon shown only on the selected card. */}
+              {isSelected && (
+                <span
+                  aria-hidden
+                  className="brass-button absolute -top-3 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full px-2 py-0.5 font-serif text-[8px] font-bold uppercase tracking-[0.18em] sm:text-[9px]"
+                >
+                  Pilihan
+                </span>
+              )}
               {/* Top-left pip */}
               <div
                 className={cn(
@@ -68,8 +84,9 @@ export function VoteDeck({ deck, selected, disabled, onPick }: Props) {
               {/* Center value with faded suit watermark */}
               <span
                 className={cn(
-                  "pointer-events-none absolute inset-0 flex items-center justify-center text-[28px] opacity-15 sm:text-[44px]",
+                  "pointer-events-none absolute inset-0 flex items-center justify-center text-[28px] sm:text-[44px]",
                   colorClass,
+                  isSelected ? "opacity-25" : "opacity-15",
                 )}
                 aria-hidden
               >
@@ -77,8 +94,11 @@ export function VoteDeck({ deck, selected, disabled, onPick }: Props) {
               </span>
               <span
                 className={cn(
-                  "relative z-10 flex h-full w-full items-center justify-center text-base tracking-tight sm:text-xl",
+                  "relative z-10 flex h-full w-full items-center justify-center tracking-tight",
                   colorClass,
+                  isSelected
+                    ? "text-lg sm:text-2xl"
+                    : "text-base sm:text-xl",
                 )}
               >
                 {card}

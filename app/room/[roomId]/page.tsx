@@ -506,6 +506,12 @@ export default function RoomPage({ params }: { params: Params }) {
   );
 
   const handleLeave = useCallback(async () => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Yakin mau keluar dari room ini?")
+    ) {
+      return;
+    }
     setLeaving(true);
     if (playerId) {
       const supabase = getSupabase();
