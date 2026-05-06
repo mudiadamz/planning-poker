@@ -242,8 +242,11 @@ export default function RoomPage({ params }: { params: Params }) {
   // Verify our locally-stored player still exists in DB. If not, two cases:
   //   (a) Tab was inactive too long → auto-cleanup deleted us. Show in-room
   //       InactiveDialog with a Rejoin button; keep the URL and room view.
-  //   (b) Otherwise (tab was active when row vanished) → owner kicked us.
-  //       Keep the legacy alert + redirect-home flow.
+  //   (b) Otherwise (tab was active when row vanished) → we got disconnected
+  //       (network blip, server cleanup race, etc.). Stay on the same room
+  //       URL and silently auto-rejoin with the same name. If we don't have
+  //       a name on hand, just drop back to the JoinDialog. Either way: no
+  //       redirect home.
   useEffect(() => {
     if (loading || !room || !playerId || leaving || inactiveKicked) return;
     const stillThere = players.some((p) => p.id === playerId);
@@ -262,25 +265,50 @@ export default function RoomPage({ params }: { params: Params }) {
           setInactiveKicked(true);
           return;
         }
-        setLeaving(true);
+
+        // Disconnected while the tab was active. Drop the stale local id,
+        // keep the user on the same /room/<roomId> URL, and auto-rejoin
+        // with the same display name if we have one. Falling back to the
+        // JoinDialog (via clear()) covers the edge case where the name
+        // isn't in localStorage anymore.
+        const name = playerName;
         clear();
-        if (typeof window !== "undefined") {
-          window.alert("Kamu dikeluarkan / disconnect dari room ini.");
-        }
-        router.push("/");
+        if (!name) return;
+        void (async () => {
+          try {
+            const supabase = getSupabase();
+            const { data, error: insertErr } = await supabase
+              .from("players")
+              .insert({ room_id: roomId, name })
+              .select("*")
+              .single();
+            if (insertErr) throw insertErr;
+            if (!data) return;
+            setIdentity(data.id, data.name);
+            setPlayers((prev) =>
+              prev.some((p) => p.id === data.id) ? prev : [...prev, data],
+            );
+            lastActiveAtRef.current = Date.now();
+          } catch (err) {
+            console.error("auto-rejoin failed", err);
+            // Leave identity cleared so the JoinDialog can take over and
+            // the user can manually rejoin without leaving the room.
+          }
+        })();
       }, 1500);
       return () => window.clearTimeout(timer);
     }
   }, [
     loading,
     room,
+    roomId,
     players,
     playerId,
     leaving,
     inactiveKicked,
     playerName,
     clear,
-    router,
+    setIdentity,
   ]);
 
   useHeartbeat(inactiveKicked ? null : playerId, roomId);
