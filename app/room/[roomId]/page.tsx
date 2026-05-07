@@ -10,6 +10,7 @@ import { useIdentity } from "@/lib/store";
 import { DEFAULT_DECK, findPreset } from "@/lib/decks";
 import {
   cleanupStalePlayers,
+  cleanupStalePlayersOnJoin,
   STALE_AFTER_SECONDS,
   useHeartbeat,
   useStalePlayerCleanup,
@@ -106,6 +107,18 @@ export default function RoomPage({ params }: { params: Params }) {
     async function load() {
       setLoading(true);
       try {
+        // Two-phase ghost sweep BEFORE we fetch the player list so the
+        // user never sees seats from someone whose tab died days ago:
+        //   1. Server sweep with the tight JOIN window (~90s). Uses the
+        //      service role so RLS/anon-key issues can't silently block
+        //      the delete. This is what makes "open the link a day
+        //      later" land on a clean room.
+        //   2. Client sweep with the regular STALE window as a fallback
+        //      in case the server route is unavailable (e.g. service
+        //      role env vars missing in local dev).
+        // Both are awaited so realtime DELETE events can fan out to any
+        // already-connected client before our SELECT runs.
+        await cleanupStalePlayersOnJoin(roomId);
         await cleanupStalePlayers(roomId).catch(() => {});
 
         const { data: roomData, error: roomErr } = await supabase

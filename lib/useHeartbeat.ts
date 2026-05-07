@@ -3,9 +3,12 @@
 import { useEffect } from "react";
 
 import { getSupabase } from "./supabase";
-import { STALE_AFTER_SECONDS } from "./presenceConstants";
+import {
+  JOIN_STALE_AFTER_SECONDS,
+  STALE_AFTER_SECONDS,
+} from "./presenceConstants";
 
-export { STALE_AFTER_SECONDS };
+export { JOIN_STALE_AFTER_SECONDS, STALE_AFTER_SECONDS };
 
 // Heartbeat tuning. We deliberately keep users "active" for a long time so
 // people don't get auto-kicked just because they switched browser tabs to a
@@ -67,21 +70,72 @@ export function useHeartbeat(playerId: string | null, roomId: string | null) {
 }
 
 /**
- * Server-cleanup helper: removes player rows in the given room whose
- * `last_seen` is older than `staleSeconds`. Called once on mount of the room
- * page so abandoned tabs don't litter the seats.
+ * Client-side stale-player sweep: removes player rows in the given
+ * room whose `last_seen` is older than `staleSeconds`, using the
+ * caller's anon Supabase client. Run periodically by every active
+ * client in the room (see `useStalePlayerCleanup`).
+ *
+ * Errors are surfaced via `console.error` instead of being swallowed
+ * — silent failure here is what allows ghost seats to persist for
+ * hours / days when RLS or network misbehaves.
  */
 export async function cleanupStalePlayers(
   roomId: string,
   staleSeconds = STALE_AFTER_SECONDS,
-): Promise<void> {
+): Promise<number> {
   const supabase = getSupabase();
   const cutoff = new Date(Date.now() - staleSeconds * 1000).toISOString();
-  await supabase
+  const { data, error } = await supabase
     .from("players")
     .delete()
     .eq("room_id", roomId)
-    .lt("last_seen", cutoff);
+    .lt("last_seen", cutoff)
+    .select("id");
+  if (error) {
+    console.error("cleanupStalePlayers (client) failed", error);
+    return 0;
+  }
+  return data?.length ?? 0;
+}
+
+/**
+ * Server-side stale-player sweep via `/api/cleanup`. Uses the
+ * service role on the server, so it bypasses RLS and any flaky anon
+ * delete policy. Defaults to the tighter `JOIN_STALE_AFTER_SECONDS`
+ * window — call this on room mount to evict ghosts the moment a real
+ * visitor lands on the page.
+ *
+ * Returns the number of players deleted, or 0 on any failure (the
+ * client-side periodic sweep will pick up the slack on the next
+ * tick, so the room never gets stuck).
+ */
+export async function cleanupStalePlayersOnJoin(
+  roomId: string,
+  staleSeconds = JOIN_STALE_AFTER_SECONDS,
+): Promise<number> {
+  try {
+    const res = await fetch("/api/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, staleSeconds }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error(
+        "cleanupStalePlayersOnJoin (server) failed",
+        res.status,
+        text,
+      );
+      return 0;
+    }
+    const json = (await res.json().catch(() => null)) as {
+      deleted?: number;
+    } | null;
+    return json?.deleted ?? 0;
+  } catch (err) {
+    console.error("cleanupStalePlayersOnJoin (server) error", err);
+    return 0;
+  }
 }
 
 /**

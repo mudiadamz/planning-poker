@@ -38,9 +38,21 @@ Open <http://localhost:3000>.
 3. In **Environment Variables**, add:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY` *(used by the server-side cleanup route — see below)*
+   - `CLEANUP_CRON_SECRET` *(or set `CRON_SECRET` — Vercel Cron auto-attaches it)*
 4. Click **Deploy**. Done.
 
-That's it — no edge functions, no API routes. The browser talks directly to Supabase via the anon key + RLS.
+### Scheduled ghost cleanup (Vercel Cron)
+
+`vercel.json` registers a cron job that hits `GET /api/cleanup` every
+5 minutes. The route uses the service role key to delete any
+`players` row whose `last_seen` is older than 15 minutes — across
+**all** rooms. This is what catches ghosts in rooms nobody is
+currently visiting (no client to run the in-page cleanup loop).
+
+The endpoint requires `Authorization: Bearer <CLEANUP_CRON_SECRET>`,
+which Vercel Cron attaches for you when you set `CRON_SECRET` (or our
+explicit `CLEANUP_CRON_SECRET`) in project env vars.
 
 ## How it works
 
