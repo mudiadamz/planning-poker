@@ -1,14 +1,40 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  Crown,
+  History,
   Loader2,
   Lock,
   LogOut,
   RefreshCcw,
   ShieldCheck,
   Spade,
+  UserMinus,
+  Users,
 } from "lucide-react";
+
+type AdminPlayer = {
+  id: string;
+  name: string;
+  vote: string | null;
+  last_seen: string;
+  joined_at: string;
+  active: boolean;
+};
+
+type AdminRoom = {
+  id: string;
+  name: string | null;
+  revealed: boolean;
+  owner_id: string | null;
+  effective_owner_id: string | null;
+  created_at: string;
+  players: AdminPlayer[];
+  total_count: number;
+  active_count: number;
+};
 
 type VotingRound = {
   id: string;
@@ -21,54 +47,113 @@ type VotingRound = {
   created_at: string;
 };
 
+type Mode =
+  | { kind: "rooms" }
+  | { kind: "history"; roomId: string; roomName: string | null };
+
+const ROOMS_REFRESH_INTERVAL_MS = 10_000;
+
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
+  const [mode, setMode] = useState<Mode>({ kind: "rooms" });
+
+  const [rooms, setRooms] = useState<AdminRoom[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
+  const [roomsError, setRoomsError] = useState<string | null>(null);
+
   const [rounds, setRounds] = useState<VotingRound[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  const [roomFilter, setRoomFilter] = useState("");
+  // Inline action state, keyed by player or room id.
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const fetchHistory = useCallback(
-    async (room?: string) => {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const params = new URLSearchParams();
-        if (room) params.set("room_id", room);
-        const res = await fetch(`/api/admin/history?${params.toString()}`, {
-          method: "GET",
-          credentials: "same-origin",
-        });
-        if (res.status === 401) {
-          setAuthed(false);
-          return;
-        }
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({ error: "Error" }));
-          throw new Error(body.error || `HTTP ${res.status}`);
-        }
-        const body = (await res.json()) as { rounds: VotingRound[] };
-        setRounds(body.rounds);
-        setAuthed(true);
-      } catch (err) {
-        console.error(err);
-        setLoadError(err instanceof Error ? err.message : "Gagal memuat history.");
-      } finally {
-        setLoading(false);
+  const fetchRooms = useCallback(async (silent = false) => {
+    if (!silent) setRoomsLoading(true);
+    setRoomsError(null);
+    try {
+      const res = await fetch("/api/admin/rooms", {
+        method: "GET",
+        credentials: "same-origin",
+      });
+      if (res.status === 401) {
+        setAuthed(false);
+        return;
       }
-    },
-    [],
-  );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Error" }));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const body = (await res.json()) as { rooms: AdminRoom[] };
+      setRooms(body.rooms);
+      setAuthed(true);
+    } catch (err) {
+      console.error(err);
+      setRoomsError(err instanceof Error ? err.message : "Gagal memuat rooms.");
+    } finally {
+      if (!silent) setRoomsLoading(false);
+    }
+  }, []);
 
-  // Initial probe — try fetching history; if 401 we'll show the login form.
+  const fetchHistory = useCallback(async (roomId: string) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const params = new URLSearchParams({ room_id: roomId });
+      const res = await fetch(`/api/admin/history?${params.toString()}`, {
+        method: "GET",
+        credentials: "same-origin",
+      });
+      if (res.status === 401) {
+        setAuthed(false);
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Error" }));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const body = (await res.json()) as { rounds: VotingRound[] };
+      setRounds(body.rounds);
+    } catch (err) {
+      console.error(err);
+      setHistoryError(
+        err instanceof Error ? err.message : "Gagal memuat history.",
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    void fetchHistory();
-  }, [fetchHistory]);
+    void fetchRooms();
+  }, [fetchRooms]);
+
+  // Auto-refresh the rooms overview while it's the active view so
+  // active counts stay roughly fresh without a manual click.
+  useEffect(() => {
+    if (mode.kind !== "rooms" || authed !== true) return;
+    const id = window.setInterval(() => {
+      void fetchRooms(true);
+    }, ROOMS_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [mode.kind, authed, fetchRooms]);
+
+  // When entering history mode, load that room's rounds.
+  const lastFetchedHistoryFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (mode.kind !== "history") {
+      lastFetchedHistoryFor.current = null;
+      return;
+    }
+    if (lastFetchedHistoryFor.current === mode.roomId) return;
+    lastFetchedHistoryFor.current = mode.roomId;
+    void fetchHistory(mode.roomId);
+  }, [mode, fetchHistory]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -86,7 +171,7 @@ export default function AdminPage() {
         throw new Error(body.error || "Login gagal.");
       }
       setPassword("");
-      await fetchHistory();
+      await fetchRooms();
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : "Login gagal.");
     } finally {
@@ -100,10 +185,103 @@ export default function AdminPage() {
       credentials: "same-origin",
     });
     setAuthed(false);
+    setRooms([]);
     setRounds([]);
+    setMode({ kind: "rooms" });
   }
 
-  const grouped = useMemo(() => {
+  const setBusy = useCallback((key: string, v: boolean) => {
+    setPending((prev) => {
+      if (!v) {
+        const { [key]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [key]: true };
+    });
+  }, []);
+
+  const handleTransfer = useCallback(
+    async (room: AdminRoom, player: AdminPlayer) => {
+      if (player.id === room.effective_owner_id) return;
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(
+          `Pindahkan kepemilikan room "${room.name ?? room.id}" ke ${player.name}?`,
+        )
+      ) {
+        return;
+      }
+      const key = `transfer:${room.id}:${player.id}`;
+      setBusy(key, true);
+      setActionError(null);
+      try {
+        const res = await fetch("/api/admin/transfer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            roomId: room.id,
+            newOwnerId: player.id,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: "Error" }));
+          throw new Error(body.error || `HTTP ${res.status}`);
+        }
+        await fetchRooms(true);
+      } catch (err) {
+        console.error(err);
+        setActionError(
+          err instanceof Error ? err.message : "Gagal transfer ownership.",
+        );
+      } finally {
+        setBusy(key, false);
+      }
+    },
+    [fetchRooms, setBusy],
+  );
+
+  const handleKick = useCallback(
+    async (room: AdminRoom, player: AdminPlayer) => {
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(
+          `Keluarkan ${player.name} dari room "${room.name ?? room.id}"?`,
+        )
+      ) {
+        return;
+      }
+      const key = `kick:${room.id}:${player.id}`;
+      setBusy(key, true);
+      setActionError(null);
+      try {
+        const res = await fetch("/api/admin/kick", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            roomId: room.id,
+            playerId: player.id,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: "Error" }));
+          throw new Error(body.error || `HTTP ${res.status}`);
+        }
+        await fetchRooms(true);
+      } catch (err) {
+        console.error(err);
+        setActionError(
+          err instanceof Error ? err.message : "Gagal kick player.",
+        );
+      } finally {
+        setBusy(key, false);
+      }
+    },
+    [fetchRooms, setBusy],
+  );
+
+  const groupedHistory = useMemo(() => {
     const map = new Map<string, VotingRound[]>();
     for (const r of rounds) {
       const list = map.get(r.room_id) ?? [];
@@ -142,7 +320,7 @@ export default function AdminPage() {
                   Superadmin
                 </h1>
                 <p className="text-xs text-wood/80">
-                  Masukkan password admin untuk lihat history voting.
+                  Masukkan password admin untuk akses room overview.
                 </p>
               </div>
             </div>
@@ -176,6 +354,134 @@ export default function AdminPage() {
   const pillBase =
     "inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-wood-dark/70 px-2.5 py-1.5 text-xs font-medium text-ivory transition hover:border-gold hover:text-gold-soft sm:px-3";
 
+  if (mode.kind === "history") {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-4 py-8">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMode({ kind: "rooms" })}
+              className={pillBase}
+              title="Kembali ke daftar room"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Rooms</span>
+            </button>
+            <div className="min-w-0">
+              <h1 className="truncate font-serif text-xl font-bold text-ivory-soft">
+                {mode.roomName || "Untitled room"}
+              </h1>
+              <p className="truncate font-mono text-xs text-gold-soft">
+                {mode.roomId}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void fetchHistory(mode.roomId)}
+              disabled={historyLoading}
+              className={`${pillBase} disabled:opacity-50`}
+              title="Refresh"
+            >
+              <RefreshCcw
+                className={`h-3.5 w-3.5 ${historyLoading ? "animate-spin" : ""}`}
+              />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-wood-dark/70 px-2.5 py-1.5 text-xs font-medium text-ivory transition hover:border-red-400 hover:text-red-300 sm:px-3"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+          </div>
+        </header>
+
+        {historyError && (
+          <p className="rounded-lg border border-red-400/60 bg-red-500/15 px-3 py-2 text-sm text-red-200">
+            {historyError}
+          </p>
+        )}
+
+        {!historyLoading && rounds.length === 0 && (
+          <div className="wood-frame flex flex-col items-center gap-2 rounded-2xl p-10 text-center text-ivory-dim">
+            <Spade className="h-6 w-6 text-gold/70" />
+            <p className="text-sm">
+              Belum ada history voting untuk room ini.
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-6">
+          {groupedHistory.map(([roomId, list]) => (
+            <section
+              key={roomId}
+              className="wood-frame rounded-2xl p-4 sm:p-5"
+            >
+              <header className="mb-3 flex items-baseline justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-serif text-sm font-bold text-ivory-soft">
+                    {list[0].room_name || "Untitled room"}
+                  </div>
+                  <div className="font-mono text-[11px] text-gold-soft">
+                    {roomId}
+                  </div>
+                </div>
+                <div className="text-[11px] uppercase tracking-wide text-ivory-dim">
+                  {list.length} round{list.length === 1 ? "" : "s"}
+                </div>
+              </header>
+
+              <ul className="flex flex-col gap-3">
+                {list.map((r) => (
+                  <li
+                    key={r.id}
+                    className="rounded-xl border border-gold/30 bg-felt-dark/60 p-3"
+                  >
+                    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-[11px] text-ivory-dim">
+                      <span>{new Date(r.created_at).toLocaleString()}</span>
+                      <span className="flex items-center gap-3">
+                        <span>
+                          {r.vote_count} vote
+                          {r.vote_count === 1 ? "" : "s"}
+                        </span>
+                        {r.average !== null && (
+                          <span className="font-serif font-bold text-gold-soft">
+                            avg {Number(r.average).toFixed(1)}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {r.votes.map((v) => (
+                        <span
+                          key={v.player_id}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-wood-dark/70 px-2 py-0.5 text-[11px] text-ivory"
+                        >
+                          <span className="max-w-[120px] truncate">
+                            {v.name}
+                          </span>
+                          <span className="rounded border border-gold/40 bg-gold/15 px-1.5 font-mono font-bold text-gold-soft">
+                            {v.vote ?? "—"}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </main>
+    );
+  }
+
+  // mode.kind === "rooms"
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-4 py-8">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -185,22 +491,24 @@ export default function AdminPage() {
           </div>
           <div>
             <h1 className="font-serif text-xl font-bold text-ivory-soft">
-              Voting history
+              Rooms overview
             </h1>
             <p className="text-xs text-ivory-dim">
-              Snapshot setiap sesi voting yang sudah di-reveal & di-reset.
+              Semua room aktif beserta pemainnya. Auto-refresh tiap 10 detik.
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void fetchHistory(roomFilter || undefined)}
-            disabled={loading}
+            onClick={() => void fetchRooms()}
+            disabled={roomsLoading}
             className={`${pillBase} disabled:opacity-50`}
             title="Refresh"
           >
-            <RefreshCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCcw
+              className={`h-3.5 w-3.5 ${roomsLoading ? "animate-spin" : ""}`}
+            />
             <span className="hidden sm:inline">Refresh</span>
           </button>
           <button
@@ -214,93 +522,209 @@ export default function AdminPage() {
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          value={roomFilter}
-          onChange={(e) => setRoomFilter(e.target.value)}
-          placeholder="Filter by room id (optional)"
-          className="min-w-0 flex-1 rounded-lg border border-gold/40 bg-wood-dark/70 px-3 py-2 text-sm font-mono text-ivory-soft outline-none transition placeholder:text-ivory-dim focus:border-gold focus:ring-1 focus:ring-gold"
-        />
-        <button
-          type="button"
-          onClick={() => void fetchHistory(roomFilter || undefined)}
-          className="brass-button rounded-lg px-3 py-2 font-serif text-xs font-bold uppercase tracking-wider"
-        >
-          Apply
-        </button>
-      </div>
-
-      {loadError && (
+      {roomsError && (
         <p className="rounded-lg border border-red-400/60 bg-red-500/15 px-3 py-2 text-sm text-red-200">
-          {loadError}
+          {roomsError}
+        </p>
+      )}
+      {actionError && (
+        <p className="rounded-lg border border-red-400/60 bg-red-500/15 px-3 py-2 text-sm text-red-200">
+          {actionError}
+          <button
+            onClick={() => setActionError(null)}
+            className="ml-3 text-red-300 hover:text-ivory-soft"
+          >
+            ×
+          </button>
         </p>
       )}
 
-      {!loading && rounds.length === 0 && (
+      {!roomsLoading && rooms.length === 0 && (
         <div className="wood-frame flex flex-col items-center gap-2 rounded-2xl p-10 text-center text-ivory-dim">
           <Spade className="h-6 w-6 text-gold/70" />
-          <p className="text-sm">Belum ada history voting.</p>
+          <p className="text-sm">Belum ada room.</p>
         </div>
       )}
 
-      <div className="flex flex-col gap-6">
-        {grouped.map(([roomId, list]) => (
-          <section
-            key={roomId}
-            className="wood-frame rounded-2xl p-4 sm:p-5"
-          >
-            <header className="mb-3 flex items-baseline justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate font-serif text-sm font-bold text-ivory-soft">
-                  {list[0].room_name || "Untitled room"}
-                </div>
-                <div className="font-mono text-[11px] text-gold-soft">
-                  {roomId}
-                </div>
-              </div>
-              <div className="text-[11px] uppercase tracking-wide text-ivory-dim">
-                {list.length} round{list.length === 1 ? "" : "s"}
-              </div>
-            </header>
-
-            <ul className="flex flex-col gap-3">
-              {list.map((r) => (
-                <li
-                  key={r.id}
-                  className="rounded-xl border border-gold/30 bg-felt-dark/60 p-3"
-                >
-                  <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-[11px] text-ivory-dim">
-                    <span>
-                      {new Date(r.created_at).toLocaleString()}
-                    </span>
-                    <span className="flex items-center gap-3">
-                      <span>{r.vote_count} vote{r.vote_count === 1 ? "" : "s"}</span>
-                      {r.average !== null && (
-                        <span className="font-serif font-bold text-gold-soft">
-                          avg {Number(r.average).toFixed(1)}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {r.votes.map((v) => (
-                      <span
-                        key={v.player_id}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-wood-dark/70 px-2 py-0.5 text-[11px] text-ivory"
-                      >
-                        <span className="truncate max-w-[120px]">{v.name}</span>
-                        <span className="rounded border border-gold/40 bg-gold/15 px-1.5 font-mono font-bold text-gold-soft">
-                          {v.vote ?? "—"}
-                        </span>
-                      </span>
-                    ))}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
+      <div className="flex flex-col gap-5">
+        {rooms.map((room) => (
+          <RoomCard
+            key={room.id}
+            room={room}
+            pending={pending}
+            pillBase={pillBase}
+            onTransfer={(p) => void handleTransfer(room, p)}
+            onKick={(p) => void handleKick(room, p)}
+            onViewHistory={() =>
+              setMode({
+                kind: "history",
+                roomId: room.id,
+                roomName: room.name,
+              })
+            }
+          />
         ))}
       </div>
     </main>
   );
+}
+
+function RoomCard({
+  room,
+  pending,
+  pillBase,
+  onTransfer,
+  onKick,
+  onViewHistory,
+}: {
+  room: AdminRoom;
+  pending: Record<string, boolean>;
+  pillBase: string;
+  onTransfer: (player: AdminPlayer) => void;
+  onKick: (player: AdminPlayer) => void;
+  onViewHistory: () => void;
+}) {
+  const hasActive = room.active_count > 0;
+  return (
+    <section className="wood-frame rounded-2xl p-4 sm:p-5">
+      <header className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                hasActive
+                  ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]"
+                  : "bg-ivory-dim/50"
+              }`}
+              title={hasActive ? "Active" : "Idle"}
+              aria-label={hasActive ? "Active" : "Idle"}
+            />
+            <span className="truncate font-serif text-base font-bold text-ivory-soft">
+              {room.name || "Untitled room"}
+            </span>
+            {room.revealed && (
+              <span className="rounded border border-gold/40 bg-gold/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gold-soft">
+                Revealed
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 font-mono text-[11px] text-gold-soft">
+            {room.id}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200">
+            <Users className="h-3.5 w-3.5" />
+            {room.active_count} active / {room.total_count}
+          </span>
+          <button
+            type="button"
+            onClick={onViewHistory}
+            className={pillBase}
+            title="Lihat history voting"
+          >
+            <History className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">History</span>
+          </button>
+        </div>
+      </header>
+
+      {room.players.length === 0 ? (
+        <p className="rounded-lg border border-gold/20 bg-felt-dark/40 px-3 py-3 text-xs text-ivory-dim">
+          Tidak ada pemain di room ini.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {room.players.map((p) => {
+            const isOwner = p.id === room.effective_owner_id;
+            const transferKey = `transfer:${room.id}:${p.id}`;
+            const kickKey = `kick:${room.id}:${p.id}`;
+            const transferring = !!pending[transferKey];
+            const kicking = !!pending[kickKey];
+
+            return (
+              <li
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gold/25 bg-felt-dark/60 px-3 py-2"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      p.active ? "bg-emerald-400" : "bg-ivory-dim/40"
+                    }`}
+                    aria-hidden
+                  />
+                  <span className="truncate text-sm text-ivory">{p.name}</span>
+                  {isOwner && (
+                    <span className="inline-flex items-center gap-1 rounded border border-gold/50 bg-gold/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gold-soft">
+                      <Crown className="h-3 w-3" />
+                      Owner
+                    </span>
+                  )}
+                  <span
+                    className="hidden text-[11px] text-ivory-dim sm:inline"
+                    title={`Last seen ${new Date(p.last_seen).toLocaleString()}`}
+                  >
+                    {p.active ? "online" : relativeTimeShort(p.last_seen)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onTransfer(p)}
+                    disabled={isOwner || transferring}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gold/40 bg-wood-dark/70 px-2 py-1 text-[11px] font-medium text-ivory transition hover:border-gold hover:text-gold-soft disabled:cursor-not-allowed disabled:opacity-40"
+                    title={
+                      isOwner
+                        ? "Sudah owner"
+                        : "Jadikan player ini sebagai owner room"
+                    }
+                  >
+                    {transferring ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Crown className="h-3 w-3" />
+                    )}
+                    <span className="hidden sm:inline">Make owner</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onKick(p)}
+                    disabled={kicking}
+                    className="inline-flex items-center gap-1 rounded-lg border border-red-400/40 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-200 transition hover:border-red-400 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    title="Keluarkan player dari room"
+                  >
+                    {kicking ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <UserMinus className="h-3 w-3" />
+                    )}
+                    <span className="hidden sm:inline">Kick</span>
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Render a `last_seen` timestamp as "5m ago" / "2h ago" / "3d ago"
+ * for the inline player row. Kept short on purpose so a long offline
+ * gap doesn't blow up the row width on small screens.
+ */
+function relativeTimeShort(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diff) || diff < 0) return "—";
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const d = Math.floor(hr / 24);
+  return `${d}d ago`;
 }
