@@ -19,6 +19,11 @@ import type { Player, Room } from "@/lib/types";
 import { InactiveDialog } from "@/components/InactiveDialog";
 import { JoinDialog } from "@/components/JoinDialog";
 import { RoomControls } from "@/components/RoomControls";
+import { BroadcastComposer } from "@/components/BroadcastComposer";
+import {
+  BroadcastInbox,
+  type BroadcastMessage,
+} from "@/components/BroadcastInbox";
 import { PokerTable } from "@/components/PokerTable";
 import { VoteDeck } from "@/components/VoteDeck";
 import { Stats } from "@/components/Stats";
@@ -48,6 +53,10 @@ export default function RoomPage({ params }: { params: Params }) {
   const [leaving, setLeaving] = useState(false);
   const [inactiveKicked, setInactiveKicked] = useState(false);
   const [inactiveName, setInactiveName] = useState<string | null>(null);
+  const [inbox, setInbox] = useState<BroadcastMessage[]>([]);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastBusy, setBroadcastBusy] = useState(false);
+  const [broadcastError, setBroadcastError] = useState<string | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const playerIdRef = useRef<string | null>(null);
@@ -242,6 +251,42 @@ export default function RoomPage({ params }: { params: Params }) {
           if (id !== playerIdRef.current) playSound("leave");
           return prev.filter((x) => x.id !== id);
         });
+      })
+      .on("broadcast", { event: "message" }, (msg) => {
+        // Owner / admin broadcast to everyone in the room. We render
+        // the toast for ~12s and let the user dismiss it manually.
+        // Admin messages get an extra-distinct accent (see
+        // BroadcastInbox) so they're not mistaken for a teammate
+        // shouting in chat.
+        const payload = msg.payload as
+          | {
+              message?: string;
+              from?: string;
+              source?: string;
+              ts?: string;
+            }
+          | undefined;
+        const text = payload?.message;
+        if (!text) return;
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const source: "owner" | "admin" =
+          payload?.source === "admin" ? "admin" : "owner";
+        setInbox((prev) => [
+          ...prev,
+          {
+            id,
+            message: text,
+            from: payload?.from || (source === "admin" ? "Admin" : "Owner"),
+            source,
+            ts: payload?.ts || new Date().toISOString(),
+          },
+        ]);
+        // Soft ping — "reveal" is too dramatic for routine owner
+        // shouts ("voting time, folks").
+        playSound("join");
+        window.setTimeout(() => {
+          setInbox((prev) => prev.filter((m) => m.id !== id));
+        }, 12_000);
       })
       .subscribe();
 
@@ -530,6 +575,59 @@ export default function RoomPage({ params }: { params: Params }) {
     [me, playerName, spawnFloater],
   );
 
+  const handleBroadcastSend = useCallback(
+    async (message: string) => {
+      const trimmed = message.trim();
+      if (!trimmed) return;
+      const channel = channelRef.current;
+      if (!channel) {
+        setBroadcastError("Channel belum siap, coba lagi sebentar.");
+        return;
+      }
+      setBroadcastBusy(true);
+      setBroadcastError(null);
+      try {
+        const fromName = me?.name ?? playerName ?? "Owner";
+        const ts = new Date().toISOString();
+        await channel.send({
+          type: "broadcast",
+          event: "message",
+          payload: {
+            message: trimmed,
+            from: fromName,
+            source: "owner",
+            ts,
+          },
+        });
+        // Echo locally — Supabase broadcast does not deliver back to
+        // the sender, so without this the owner sees nothing happen.
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        setInbox((prev) => [
+          ...prev,
+          {
+            id,
+            message: trimmed,
+            from: fromName,
+            source: "owner",
+            ts,
+          },
+        ]);
+        window.setTimeout(() => {
+          setInbox((prev) => prev.filter((m) => m.id !== id));
+        }, 12_000);
+        setBroadcastOpen(false);
+      } catch (err) {
+        console.error(err);
+        setBroadcastError(
+          err instanceof Error ? err.message : "Gagal mengirim broadcast.",
+        );
+      } finally {
+        setBroadcastBusy(false);
+      }
+    },
+    [me, playerName],
+  );
+
   const handleTransferOwnership = useCallback(
     async (targetId: string) => {
       if (!room || !isOwner || !playerId || targetId === playerId) return;
@@ -690,7 +788,33 @@ export default function RoomPage({ params }: { params: Params }) {
         reactTargets={reactTargets}
         meId={playerId}
         onEmoji={handleEmoji}
+        canBroadcast={isOwner}
+        onBroadcast={() => {
+          setBroadcastError(null);
+          setBroadcastOpen(true);
+        }}
         onLeave={handleLeave}
+      />
+
+      <BroadcastInbox
+        messages={inbox}
+        onDismiss={(id) =>
+          setInbox((prev) => prev.filter((m) => m.id !== id))
+        }
+      />
+
+      <BroadcastComposer
+        open={broadcastOpen}
+        context={`Pesan ini akan muncul untuk semua orang di room "${
+          room.name ?? room.id
+        }".`}
+        placeholder="Contoh: Voting story ABC-123 sekarang ya, please!"
+        busy={broadcastBusy}
+        error={broadcastError}
+        onSubmit={handleBroadcastSend}
+        onClose={() => {
+          if (!broadcastBusy) setBroadcastOpen(false);
+        }}
       />
 
       <div className="flex justify-end px-3 sm:px-6">

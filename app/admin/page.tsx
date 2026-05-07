@@ -4,16 +4,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Crown,
+  ExternalLink,
   History,
   Loader2,
   Lock,
   LogOut,
+  Megaphone,
+  Pencil,
   RefreshCcw,
   ShieldCheck,
   Spade,
+  Trash2,
   UserMinus,
   Users,
 } from "lucide-react";
+
+import { BroadcastComposer } from "@/components/BroadcastComposer";
 
 type AdminPlayer = {
   id: string;
@@ -72,6 +78,15 @@ export default function AdminPage() {
   // Inline action state, keyed by player or room id.
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Composer state for the admin broadcast modal. Targets one room
+  // at a time — picking a room from the list opens the modal scoped
+  // to it.
+  const [broadcastTarget, setBroadcastTarget] = useState<AdminRoom | null>(
+    null,
+  );
+  const [broadcastBusy, setBroadcastBusy] = useState(false);
+  const [broadcastError, setBroadcastError] = useState<string | null>(null);
 
   const fetchRooms = useCallback(async (silent = false) => {
     if (!silent) setRoomsLoading(true);
@@ -241,6 +256,117 @@ export default function AdminPage() {
     [fetchRooms, setBusy],
   );
 
+  const handleRename = useCallback(
+    async (room: AdminRoom) => {
+      if (typeof window === "undefined") return;
+      const next = window.prompt(
+        `Ganti nama untuk room "${room.id}":`,
+        room.name ?? "",
+      );
+      if (next === null) return;
+      const trimmed = next.trim();
+      if (trimmed === (room.name ?? "")) return;
+      const key = `rename:${room.id}`;
+      setBusy(key, true);
+      setActionError(null);
+      try {
+        const res = await fetch("/api/admin/rename-room", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            roomId: room.id,
+            name: trimmed.length > 0 ? trimmed : null,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: "Error" }));
+          throw new Error(body.error || `HTTP ${res.status}`);
+        }
+        await fetchRooms(true);
+      } catch (err) {
+        console.error(err);
+        setActionError(
+          err instanceof Error ? err.message : "Gagal rename room.",
+        );
+      } finally {
+        setBusy(key, false);
+      }
+    },
+    [fetchRooms, setBusy],
+  );
+
+  const handleDelete = useCallback(
+    async (room: AdminRoom) => {
+      if (typeof window === "undefined") return;
+      if (
+        !window.confirm(
+          `Hapus room "${room.name ?? room.id}"? Semua pemain di room ini akan diputus dan history voting tetap tersimpan, tapi room-nya hilang.`,
+        )
+      ) {
+        return;
+      }
+      const key = `delete:${room.id}`;
+      setBusy(key, true);
+      setActionError(null);
+      try {
+        const res = await fetch("/api/admin/delete-room", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ roomId: room.id }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: "Error" }));
+          throw new Error(body.error || `HTTP ${res.status}`);
+        }
+        await fetchRooms(true);
+      } catch (err) {
+        console.error(err);
+        setActionError(
+          err instanceof Error ? err.message : "Gagal menghapus room.",
+        );
+      } finally {
+        setBusy(key, false);
+      }
+    },
+    [fetchRooms, setBusy],
+  );
+
+  const handleBroadcastSubmit = useCallback(
+    async (message: string) => {
+      const room = broadcastTarget;
+      if (!room) return;
+      setBroadcastBusy(true);
+      setBroadcastError(null);
+      try {
+        const res = await fetch("/api/admin/broadcast", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            roomId: room.id,
+            message,
+            from: "Admin",
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: "Error" }));
+          throw new Error(body.error || `HTTP ${res.status}`);
+        }
+        setBroadcastTarget(null);
+      } catch (err) {
+        console.error(err);
+        setBroadcastError(
+          err instanceof Error ? err.message : "Gagal mengirim broadcast.",
+        );
+      } finally {
+        setBroadcastBusy(false);
+      }
+    },
+    [broadcastTarget],
+  );
+
   const handleKick = useCallback(
     async (room: AdminRoom, player: AdminPlayer) => {
       if (
@@ -280,6 +406,24 @@ export default function AdminPage() {
     },
     [fetchRooms, setBusy],
   );
+
+  // Sort rule:
+  //   1. Rooms with at least one active player first.
+  //   2. Within each group, more active members > more total members.
+  //   3. Tie-break by created_at desc (newest first).
+  const sortedRooms = useMemo(() => {
+    return [...rooms].sort((a, b) => {
+      const aActive = a.active_count > 0 ? 1 : 0;
+      const bActive = b.active_count > 0 ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+      if (a.active_count !== b.active_count)
+        return b.active_count - a.active_count;
+      if (a.total_count !== b.total_count) return b.total_count - a.total_count;
+      return (
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+    });
+  }, [rooms]);
 
   const groupedHistory = useMemo(() => {
     const map = new Map<string, VotingRound[]>();
@@ -547,7 +691,7 @@ export default function AdminPage() {
       )}
 
       <div className="flex flex-col gap-5">
-        {rooms.map((room) => (
+        {sortedRooms.map((room) => (
           <RoomCard
             key={room.id}
             room={room}
@@ -555,6 +699,12 @@ export default function AdminPage() {
             pillBase={pillBase}
             onTransfer={(p) => void handleTransfer(room, p)}
             onKick={(p) => void handleKick(room, p)}
+            onRename={() => void handleRename(room)}
+            onDelete={() => void handleDelete(room)}
+            onBroadcast={() => {
+              setBroadcastError(null);
+              setBroadcastTarget(room);
+            }}
             onViewHistory={() =>
               setMode({
                 kind: "history",
@@ -565,6 +715,27 @@ export default function AdminPage() {
           />
         ))}
       </div>
+
+      <BroadcastComposer
+        open={!!broadcastTarget}
+        context={
+          broadcastTarget
+            ? `Pesan akan muncul untuk semua orang di room "${
+                broadcastTarget.name ?? broadcastTarget.id
+              }".`
+            : undefined
+        }
+        placeholder="Tulis pengumuman untuk peserta room..."
+        busy={broadcastBusy}
+        error={broadcastError}
+        onSubmit={handleBroadcastSubmit}
+        onClose={() => {
+          if (!broadcastBusy) {
+            setBroadcastTarget(null);
+            setBroadcastError(null);
+          }
+        }}
+      />
     </main>
   );
 }
@@ -575,6 +746,9 @@ function RoomCard({
   pillBase,
   onTransfer,
   onKick,
+  onRename,
+  onDelete,
+  onBroadcast,
   onViewHistory,
 }: {
   room: AdminRoom;
@@ -582,9 +756,14 @@ function RoomCard({
   pillBase: string;
   onTransfer: (player: AdminPlayer) => void;
   onKick: (player: AdminPlayer) => void;
+  onRename: () => void;
+  onDelete: () => void;
+  onBroadcast: () => void;
   onViewHistory: () => void;
 }) {
   const hasActive = room.active_count > 0;
+  const renaming = !!pending[`rename:${room.id}`];
+  const deleting = !!pending[`delete:${room.id}`];
   return (
     <section className="wood-frame rounded-2xl p-4 sm:p-5">
       <header className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -612,11 +791,44 @@ function RoomCard({
             {room.id}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200">
             <Users className="h-3.5 w-3.5" />
             {room.active_count} active / {room.total_count}
           </span>
+          <a
+            href={`/room/${room.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className={pillBase}
+            title="Buka room di tab baru"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Open</span>
+          </a>
+          <button
+            type="button"
+            onClick={onBroadcast}
+            className={pillBase}
+            title="Broadcast pesan ke peserta room"
+          >
+            <Megaphone className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Broadcast</span>
+          </button>
+          <button
+            type="button"
+            onClick={onRename}
+            disabled={renaming}
+            className={`${pillBase} disabled:opacity-50`}
+            title="Ubah nama room"
+          >
+            {renaming ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Pencil className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden sm:inline">Rename</span>
+          </button>
           <button
             type="button"
             onClick={onViewHistory}
@@ -625,6 +837,20 @@ function RoomCard({
           >
             <History className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">History</span>
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-red-400/40 bg-red-500/10 px-2.5 py-1.5 text-xs font-medium text-red-200 transition hover:border-red-400 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
+            title="Hapus room"
+          >
+            {deleting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden sm:inline">Delete</span>
           </button>
         </div>
       </header>

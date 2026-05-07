@@ -6,6 +6,7 @@ import {
   Copy,
   Link as LinkIcon,
   LogOut,
+  Megaphone,
   Pencil,
   UserCircle2,
   Volume2,
@@ -29,6 +30,9 @@ type Props = {
   /** Local player id, so the target picker can mark it as "(kamu)". */
   meId?: string | null;
   onEmoji?: (emoji: string, targetId: string | null) => void;
+  /** Show the room-broadcast button. Wired only for the room owner. */
+  canBroadcast?: boolean;
+  onBroadcast?: () => void;
   onLeave: () => void;
 };
 
@@ -42,6 +46,8 @@ export function RoomControls({
   reactTargets,
   meId,
   onEmoji,
+  canBroadcast,
+  onBroadcast,
   onLeave,
 }: Props) {
   const [copied, setCopied] = useState(false);
@@ -207,6 +213,19 @@ export function RoomControls({
             players={reactTargets}
             meId={meId}
           />
+        )}
+
+        {canBroadcast && onBroadcast && (
+          <button
+            type="button"
+            onClick={onBroadcast}
+            className={pillBase}
+            title="Broadcast message ke semua orang di room"
+            aria-label="Broadcast message"
+          >
+            <Megaphone className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Broadcast</span>
+          </button>
         )}
 
         <button
