@@ -44,11 +44,13 @@ Open <http://localhost:3000>.
 
 ### Scheduled ghost cleanup (Vercel Cron)
 
-`vercel.json` registers a cron job that hits `GET /api/cleanup` every
-5 minutes. The route uses the service role key to delete any
+`vercel.json` registers a cron job that hits `GET /api/cleanup` once
+a day (00:00 UTC). The route uses the service role key to delete any
 `players` row whose `last_seen` is older than 15 minutes — across
 **all** rooms. This is what catches ghosts in rooms nobody is
 currently visiting (no client to run the in-page cleanup loop).
+Per-room sweeps still run on every visitor's mount, so the daily
+cadence is fine for the global safety net.
 
 The endpoint requires `Authorization: Bearer <CLEANUP_CRON_SECRET>`,
 which Vercel Cron attaches for you when you set `CRON_SECRET` (or our
