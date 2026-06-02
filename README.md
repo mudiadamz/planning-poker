@@ -46,7 +46,7 @@ Open <http://localhost:3000>.
 
 `vercel.json` registers a cron job that hits `GET /api/cleanup` once
 a day (00:00 UTC). The route uses the service role key to delete any
-`players` row whose `last_seen` is older than 15 minutes — across
+`players` row whose `last_seen` is older than 60 minutes — across
 **all** rooms. This is what catches ghosts in rooms nobody is
 currently visiting (no client to run the in-page cleanup loop).
 Per-room sweeps still run on every visitor's mount, so the daily
@@ -74,7 +74,7 @@ flowchart LR
 - **Vote** → updates `players.vote`. Cards stay face-down for everyone until reveal.
 - **Reveal** → flips `rooms.revealed = true`. Average and distribution show up automatically.
 - **Start new voting** → flips `rooms.revealed = false` and clears all `players.vote` for that room.
-- **Heartbeat** → every 15s the local player updates `last_seen`. On page load, players whose `last_seen` is older than 60 seconds are removed.
+- **Heartbeat** → every 30s the local player updates `last_seen` (plus an immediate ping when the tab is shown or hidden). Periodic cleanup removes players whose `last_seen` is older than 60 minutes; on room load a tighter ~90s sweep clears obvious ghosts. Closing a tab sends a beacon that backdates `last_seen` so the seat clears in ~10–20s when someone else is in the room.
 
 ## Project structure
 

@@ -5,8 +5,15 @@
 
 /** Players whose `last_seen` is older than this are considered stale and
  *  swept by the periodic cleanup. Generous on purpose so users that
- *  briefly background the tab don't get auto-kicked. */
-export const STALE_AFTER_SECONDS = 15 * 60;
+ *  background the tab (meetings, Slack, etc.) don't get auto-kicked when
+ *  the browser throttles heartbeats. Tab close still accelerates removal
+ *  via the soft-leave beacon (~10s). */
+export const STALE_AFTER_SECONDS = 60 * 60;
+
+/** If our player row vanishes but we heartbeated within this window,
+ *  treat it as a cleanup race / network blip and auto-rejoin instead of
+ *  showing the inactive dialog. */
+export const HEARTBEAT_REJOIN_GRACE_SECONDS = 3 * 60;
 
 /** Tighter threshold used when a fresh visitor first lands on a room
  *  page. Heartbeats fire every 30s and even hidden/backgrounded tabs

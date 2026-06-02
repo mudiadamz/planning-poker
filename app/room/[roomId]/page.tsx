@@ -11,6 +11,8 @@ import { DEFAULT_DECK, findPreset } from "@/lib/decks";
 import {
   cleanupStalePlayers,
   cleanupStalePlayersOnJoin,
+  HEARTBEAT_REJOIN_GRACE_SECONDS,
+  lastSuccessfulHeartbeatAt,
   STALE_AFTER_SECONDS,
   useHeartbeat,
   useStalePlayerCleanup,
@@ -298,13 +300,10 @@ export default function RoomPage({ params }: { params: Params }) {
   }, [room, roomId, spawnFloater]);
 
   // Verify our locally-stored player still exists in DB. If not, two cases:
-  //   (a) Tab was inactive too long → auto-cleanup deleted us. Show in-room
-  //       InactiveDialog with a Rejoin button; keep the URL and room view.
-  //   (b) Otherwise (tab was active when row vanished) → we got disconnected
-  //       (network blip, server cleanup race, etc.). Stay on the same room
-  //       URL and silently auto-rejoin with the same name. If we don't have
-  //       a name on hand, just drop back to the JoinDialog. Either way: no
-  //       redirect home.
+  //   (a) Genuinely inactive (no heartbeat / tab visible for longer than
+  //       STALE_AFTER_SECONDS) → InactiveDialog with Rejoin.
+  //   (b) Recent heartbeat or short absence → cleanup race / network blip;
+  //       silently auto-rejoin with the same name. No redirect home.
   useEffect(() => {
     if (loading || !room || !playerId || leaving || inactiveKicked) return;
     const stillThere = players.some((p) => p.id === playerId);
@@ -314,11 +313,14 @@ export default function RoomPage({ params }: { params: Params }) {
         if (exists) return;
         const now = Date.now();
         const sinceActive = now - lastActiveAtRef.current;
-        const looksInactive =
-          (typeof document !== "undefined" &&
-            document.visibilityState === "hidden") ||
-          sinceActive > STALE_AFTER_SECONDS * 1000;
-        if (looksInactive) {
+        const sinceHeartbeat = now - lastSuccessfulHeartbeatAt.ms;
+        const recentHeartbeat =
+          sinceHeartbeat < HEARTBEAT_REJOIN_GRACE_SECONDS * 1000;
+        const genuinelyInactive =
+          !recentHeartbeat &&
+          sinceActive > STALE_AFTER_SECONDS * 1000 &&
+          sinceHeartbeat > STALE_AFTER_SECONDS * 1000;
+        if (genuinelyInactive) {
           setInactiveName(playerName ?? null);
           setInactiveKicked(true);
           return;
@@ -495,6 +497,8 @@ export default function RoomPage({ params }: { params: Params }) {
       if (err) {
         console.error(err);
         setError("Gagal mengirim vote.");
+      } else {
+        lastSuccessfulHeartbeatAt.ms = Date.now();
       }
     },
     [playerId, room],

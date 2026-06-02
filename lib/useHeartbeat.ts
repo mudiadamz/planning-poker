@@ -4,11 +4,19 @@ import { useEffect } from "react";
 
 import { getSupabase } from "./supabase";
 import {
+  HEARTBEAT_REJOIN_GRACE_SECONDS,
   JOIN_STALE_AFTER_SECONDS,
   STALE_AFTER_SECONDS,
 } from "./presenceConstants";
 
-export { JOIN_STALE_AFTER_SECONDS, STALE_AFTER_SECONDS };
+export {
+  HEARTBEAT_REJOIN_GRACE_SECONDS,
+  JOIN_STALE_AFTER_SECONDS,
+  STALE_AFTER_SECONDS,
+};
+
+/** Updated on each successful heartbeat ping (module-level for room page). */
+export const lastSuccessfulHeartbeatAt = { ms: 0 };
 
 // Heartbeat tuning. We deliberately keep users "active" for a long time so
 // people don't get auto-kicked just because they switched browser tabs to a
@@ -38,11 +46,12 @@ export function useHeartbeat(playerId: string | null, roomId: string | null) {
     async function ping() {
       if (cancelled) return;
       try {
-        await supabase
+        const { error } = await supabase
           .from("players")
           .update({ last_seen: new Date().toISOString() })
           .eq("id", playerId)
           .eq("room_id", roomId);
+        if (!error) lastSuccessfulHeartbeatAt.ms = Date.now();
       } catch (err) {
         console.error("heartbeat failed", err);
       }
@@ -53,18 +62,17 @@ export function useHeartbeat(playerId: string | null, roomId: string | null) {
       void ping();
     }, HEARTBEAT_INTERVAL_MS);
 
-    // Always re-ping the moment the tab becomes visible again, so a user
-    // returning from a long context-switch is immediately "fresh" without
-    // having to wait for the next interval tick.
-    function onVisible() {
-      if (document.visibilityState === "visible") void ping();
+    // Re-ping on any visibility change: visible → instant freshness on return;
+    // hidden → refresh `last_seen` before the browser throttles timers.
+    function onVisibilityChange() {
+      void ping();
     }
-    document.addEventListener("visibilitychange", onVisible);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       cancelled = true;
       window.clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [playerId, roomId]);
 }
