@@ -11,14 +11,11 @@ import { DEFAULT_DECK, findPreset } from "@/lib/decks";
 import {
   cleanupStalePlayers,
   cleanupStalePlayersOnJoin,
-  HEARTBEAT_REJOIN_GRACE_SECONDS,
   lastSuccessfulHeartbeatAt,
-  STALE_AFTER_SECONDS,
   useHeartbeat,
   useStalePlayerCleanup,
 } from "@/lib/useHeartbeat";
 import type { Player, Room } from "@/lib/types";
-import { InactiveDialog } from "@/components/InactiveDialog";
 import { JoinDialog } from "@/components/JoinDialog";
 import { RoomControls } from "@/components/RoomControls";
 import { BroadcastComposer } from "@/components/BroadcastComposer";
@@ -53,8 +50,6 @@ export default function RoomPage({ params }: { params: Params }) {
   const [error, setError] = useState<string | null>(null);
   const [floaters, setFloaters] = useState<EmojiFloater[]>([]);
   const [leaving, setLeaving] = useState(false);
-  const [inactiveKicked, setInactiveKicked] = useState(false);
-  const [inactiveName, setInactiveName] = useState<string | null>(null);
   const [inbox, setInbox] = useState<BroadcastMessage[]>([]);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [broadcastBusy, setBroadcastBusy] = useState(false);
@@ -62,27 +57,16 @@ export default function RoomPage({ params }: { params: Params }) {
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const playerIdRef = useRef<string | null>(null);
-  // Track the last time the tab was confirmed visible so we can distinguish
-  // "row deleted while I was away" (inactive auto-cleanup) from "row deleted
-  // while I was watching" (owner kick).
-  const lastActiveAtRef = useRef<number>(Date.now());
+  // Our most recent vote, kept up to date while our row exists so we can
+  // restore it on a smooth auto-rejoin after a disconnect.
+  const myLastVoteRef = useRef<string | null>(null);
+  // Monotonic round counter, bumped whenever a new voting round starts
+  // (reset: revealed flips true -> false). Used to decide whether a
+  // restored vote still belongs to the current round.
+  const roundIdRef = useRef<number>(0);
   useEffect(() => {
     playerIdRef.current = playerId;
   }, [playerId]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    if (document.visibilityState === "visible") {
-      lastActiveAtRef.current = Date.now();
-    }
-    function onVisible() {
-      if (document.visibilityState === "visible") {
-        lastActiveAtRef.current = Date.now();
-      }
-    }
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  }, []);
 
   const spawnFloater = useCallback(
     (emoji: string, from: string, to: string | null) => {
@@ -189,7 +173,12 @@ export default function RoomPage({ params }: { params: Params }) {
           setRoom((prev) => {
             if (prev) {
               if (!prev.revealed && next.revealed) playSound("reveal");
-              else if (prev.revealed && !next.revealed) playSound("reset");
+              else if (prev.revealed && !next.revealed) {
+                playSound("reset");
+                // A new voting round began — invalidate any vote we might
+                // restore on rejoin.
+                roundIdRef.current += 1;
+              }
             }
             return next;
           });
@@ -299,56 +288,46 @@ export default function RoomPage({ params }: { params: Params }) {
     };
   }, [room, roomId, spawnFloater]);
 
-  // Verify our locally-stored player still exists in DB. If not, two cases:
-  //   (a) Genuinely inactive (no heartbeat / tab visible for longer than
-  //       STALE_AFTER_SECONDS) → InactiveDialog with Rejoin.
-  //   (b) Recent heartbeat or short absence → cleanup race / network blip;
-  //       silently auto-rejoin with the same name. No redirect home.
+  // Our row vanished from the DB (stale-cleanup race, network blip, or a
+  // real disconnect) but the tab is still open. Silently auto-rejoin with
+  // the same name — no confirmation popup. If we still have a vote from the
+  // SAME round (no reset happened while we were gone), restore it so the
+  // user's card comes back exactly as they left it. Falling back to the
+  // JoinDialog (via clear()) covers the case where the name is no longer in
+  // localStorage.
   useEffect(() => {
-    if (loading || !room || !playerId || leaving || inactiveKicked) return;
+    if (loading || !room || !playerId || leaving) return;
     const stillThere = players.some((p) => p.id === playerId);
     if (!stillThere && players.length > 0) {
+      // Snapshot what we knew at the moment of disconnect.
+      const capturedVote = myLastVoteRef.current;
+      const capturedRound = roundIdRef.current;
       const timer = window.setTimeout(() => {
         const exists = players.some((p) => p.id === playerId);
         if (exists) return;
-        const now = Date.now();
-        const sinceActive = now - lastActiveAtRef.current;
-        const sinceHeartbeat = now - lastSuccessfulHeartbeatAt.ms;
-        const recentHeartbeat =
-          sinceHeartbeat < HEARTBEAT_REJOIN_GRACE_SECONDS * 1000;
-        const genuinelyInactive =
-          !recentHeartbeat &&
-          sinceActive > STALE_AFTER_SECONDS * 1000 &&
-          sinceHeartbeat > STALE_AFTER_SECONDS * 1000;
-        if (genuinelyInactive) {
-          setInactiveName(playerName ?? null);
-          setInactiveKicked(true);
-          return;
-        }
-
-        // Disconnected while the tab was active. Drop the stale local id,
-        // keep the user on the same /room/<roomId> URL, and auto-rejoin
-        // with the same display name if we have one. Falling back to the
-        // JoinDialog (via clear()) covers the edge case where the name
-        // isn't in localStorage anymore.
         const name = playerName;
         clear();
         if (!name) return;
         void (async () => {
           try {
             const supabase = getSupabase();
+            // Only carry the vote over if the round hasn't advanced since we
+            // dropped (a reset clears everyone's vote, so an old vote would
+            // be wrong in a new round).
+            const sameRound = roundIdRef.current === capturedRound;
+            const restoredVote = sameRound ? capturedVote : null;
             const { data, error: insertErr } = await supabase
               .from("players")
-              .insert({ room_id: roomId, name })
+              .insert({ room_id: roomId, name, vote: restoredVote })
               .select("*")
               .single();
             if (insertErr) throw insertErr;
             if (!data) return;
             setIdentity(data.id, data.name);
+            myLastVoteRef.current = data.vote;
             setPlayers((prev) =>
               prev.some((p) => p.id === data.id) ? prev : [...prev, data],
             );
-            lastActiveAtRef.current = Date.now();
           } catch (err) {
             console.error("auto-rejoin failed", err);
             // Leave identity cleared so the JoinDialog can take over and
@@ -365,14 +344,13 @@ export default function RoomPage({ params }: { params: Params }) {
     players,
     playerId,
     leaving,
-    inactiveKicked,
     playerName,
     clear,
     setIdentity,
   ]);
 
-  useHeartbeat(inactiveKicked ? null : playerId, roomId);
-  useStalePlayerCleanup(!inactiveKicked && playerId ? roomId : null);
+  useHeartbeat(playerId, roomId);
+  useStalePlayerCleanup(playerId ? roomId : null);
 
   // Cleanup on tab close / window close. We use `navigator.sendBeacon`
   // because regular fetch / supabase delete promises get aborted when the
@@ -420,6 +398,11 @@ export default function RoomPage({ params }: { params: Params }) {
     [players, playerId],
   );
 
+  // Keep the latest known vote so a smooth auto-rejoin can restore it.
+  useEffect(() => {
+    if (me) myLastVoteRef.current = me.vote;
+  }, [me]);
+
   // Owner resolution mirrors the SQL `current_room_owner`:
   //   1. If `room.owner_id` is set AND that player is still in the room → owner.
   //   2. Else fall back to the earliest-joined player.
@@ -438,8 +421,7 @@ export default function RoomPage({ params }: { params: Params }) {
 
   const isOwner = !!owner && !!me && owner.id === me.id;
 
-  const needsJoin =
-    !loading && !notFound && room && !me && !leaving && !inactiveKicked;
+  const needsJoin = !loading && !notFound && room && !me && !leaving;
 
   const handleJoin = useCallback(
     async (name: string) => {
@@ -462,29 +444,13 @@ export default function RoomPage({ params }: { params: Params }) {
     [roomId, setIdentity],
   );
 
-  const handleRejoinAfterInactive = useCallback(async () => {
-    const name = inactiveName ?? playerName;
-    if (!name) return;
-    clear();
-    await handleJoin(name);
-    setInactiveKicked(false);
-    setInactiveName(null);
-    lastActiveAtRef.current = Date.now();
-  }, [inactiveName, playerName, clear, handleJoin]);
-
-  const handleLeaveAfterInactive = useCallback(() => {
-    setInactiveKicked(false);
-    setInactiveName(null);
-    clear();
-    router.push("/");
-  }, [clear, router]);
-
   const handleVote = useCallback(
     async (value: string) => {
       if (!playerId || !room || room.revealed) return;
       const supabase = getSupabase();
       playSound("pick");
       // Optimistic update
+      myLastVoteRef.current = value;
       setPlayers((prev) =>
         prev.map((p) =>
           p.id === playerId ? { ...p, vote: value } : p,
@@ -879,15 +845,6 @@ export default function RoomPage({ params }: { params: Params }) {
         <JoinDialog
           defaultName={playerName ?? ""}
           onJoin={handleJoin}
-        />
-      )}
-
-      {inactiveKicked && (
-        <InactiveDialog
-          roomName={room.name}
-          playerName={inactiveName ?? playerName}
-          onRejoin={handleRejoinAfterInactive}
-          onLeave={handleLeaveAfterInactive}
         />
       )}
 
