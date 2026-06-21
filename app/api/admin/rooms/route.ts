@@ -42,9 +42,9 @@ export async function GET() {
 
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
-    .from("rooms")
+    .from("pp_rooms")
     .select(
-      "id, name, deck, revealed, owner_id, created_at, players(id, room_id, name, vote, last_seen, joined_at)",
+      "id, name, deck, revealed, owner_id, created_at, players:pp_players(id, room_id, name, vote, last_seen, joined_at)",
     )
     .order("created_at", { ascending: false });
 

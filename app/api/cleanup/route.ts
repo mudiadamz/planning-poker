@@ -100,7 +100,7 @@ export async function POST(req: Request) {
   const admin = getSupabaseAdmin();
 
   let query = admin
-    .from("players")
+    .from("pp_players")
     .delete()
     .lt("last_seen", cutoff)
     .select("id");
@@ -136,7 +136,7 @@ export async function GET(req: Request) {
   const cutoff = new Date(Date.now() - STALE_AFTER_SECONDS * 1000).toISOString();
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
-    .from("players")
+    .from("pp_players")
     .delete()
     .lt("last_seen", cutoff)
     .select("id");

@@ -75,7 +75,7 @@ export async function POST(req: Request) {
 
   const admin = getSupabaseAdmin();
   const { error } = await admin
-    .from("players")
+    .from("pp_players")
     .update({ last_seen: backdated })
     .eq("id", playerId)
     .eq("room_id", roomId);

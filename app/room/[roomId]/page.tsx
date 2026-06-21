@@ -117,7 +117,7 @@ export default function RoomPage({ params }: { params: Params }) {
         await cleanupStalePlayers(roomId).catch(() => {});
 
         const { data: roomData, error: roomErr } = await supabase
-          .from("rooms")
+          .from("pp_rooms")
           .select("*")
           .eq("id", roomId)
           .maybeSingle();
@@ -128,7 +128,7 @@ export default function RoomPage({ params }: { params: Params }) {
         }
 
         const { data: playerData, error: playerErr } = await supabase
-          .from("players")
+          .from("pp_players")
           .select("*")
           .eq("room_id", roomId)
           .order("joined_at", { ascending: true });
@@ -163,7 +163,7 @@ export default function RoomPage({ params }: { params: Params }) {
       .channel(`room:${roomId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "rooms", filter: `id=eq.${roomId}` },
+        { event: "*", schema: "public", table: "pp_rooms", filter: `id=eq.${roomId}` },
         (payload) => {
           if (payload.eventType === "DELETE") {
             setNotFound(true);
@@ -189,7 +189,7 @@ export default function RoomPage({ params }: { params: Params }) {
         {
           event: "*",
           schema: "public",
-          table: "players",
+          table: "pp_players",
           filter: `room_id=eq.${roomId}`,
         },
         (payload) => {
@@ -317,7 +317,7 @@ export default function RoomPage({ params }: { params: Params }) {
             const sameRound = roundIdRef.current === capturedRound;
             const restoredVote = sameRound ? capturedVote : null;
             const { data, error: insertErr } = await supabase
-              .from("players")
+              .from("pp_players")
               .insert({ room_id: roomId, name, vote: restoredVote })
               .select("*")
               .single();
@@ -427,7 +427,7 @@ export default function RoomPage({ params }: { params: Params }) {
     async (name: string) => {
       const supabase = getSupabase();
       const { data, error: insertErr } = await supabase
-        .from("players")
+        .from("pp_players")
         .insert({
           room_id: roomId,
           name,
@@ -457,7 +457,7 @@ export default function RoomPage({ params }: { params: Params }) {
         ),
       );
       const { error: err } = await supabase
-        .from("players")
+        .from("pp_players")
         .update({ vote: value, last_seen: new Date().toISOString() })
         .eq("id", playerId);
       if (err) {
@@ -475,7 +475,7 @@ export default function RoomPage({ params }: { params: Params }) {
     setBusy(true);
     try {
       const supabase = getSupabase();
-      const { error: err } = await supabase.rpc("reveal_room", {
+      const { error: err } = await supabase.rpc("pp_reveal_room", {
         p_room_id: room.id,
         p_player_id: playerId,
       });
@@ -493,7 +493,7 @@ export default function RoomPage({ params }: { params: Params }) {
     setBusy(true);
     try {
       const supabase = getSupabase();
-      const { error: err } = await supabase.rpc("reset_room", {
+      const { error: err } = await supabase.rpc("pp_reset_room", {
         p_room_id: room.id,
         p_player_id: playerId,
       });
@@ -512,7 +512,7 @@ export default function RoomPage({ params }: { params: Params }) {
     async (deck: string[]) => {
       if (!room || !isOwner || !playerId) return;
       const supabase = getSupabase();
-      const { error: err } = await supabase.rpc("update_room_deck", {
+      const { error: err } = await supabase.rpc("pp_update_room_deck", {
         p_room_id: room.id,
         p_player_id: playerId,
         p_deck: deck,
@@ -612,7 +612,7 @@ export default function RoomPage({ params }: { params: Params }) {
         return;
       }
       const supabase = getSupabase();
-      const { error: err } = await supabase.rpc("transfer_room_ownership", {
+      const { error: err } = await supabase.rpc("pp_transfer_room_ownership", {
         p_room_id: room.id,
         p_owner_id: playerId,
         p_new_owner_id: targetId,
@@ -637,7 +637,7 @@ export default function RoomPage({ params }: { params: Params }) {
         return;
       }
       const supabase = getSupabase();
-      const { error: err } = await supabase.rpc("kick_player", {
+      const { error: err } = await supabase.rpc("pp_kick_player", {
         p_room_id: room.id,
         p_owner_id: playerId,
         p_target_id: targetId,
@@ -662,7 +662,7 @@ export default function RoomPage({ params }: { params: Params }) {
         prev.map((p) => (p.id === playerId ? { ...p, name: trimmed } : p)),
       );
       const { error: err } = await supabase
-        .from("players")
+        .from("pp_players")
         .update({ name: trimmed })
         .eq("id", playerId);
       if (err) {
@@ -698,7 +698,7 @@ export default function RoomPage({ params }: { params: Params }) {
         }
       }
       try {
-        await supabase.from("players").delete().eq("id", playerId);
+        await supabase.from("pp_players").delete().eq("id", playerId);
       } catch {
         // ignore — we are leaving anyway
       }

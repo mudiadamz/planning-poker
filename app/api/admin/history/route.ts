@@ -24,7 +24,7 @@ export async function GET(req: Request) {
 
   const admin = getSupabaseAdmin();
   let query = admin
-    .from("voting_rounds")
+    .from("pp_voting_rounds")
     .select("*")
     .order("created_at", { ascending: false })
     .limit(limit);

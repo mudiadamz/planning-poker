@@ -28,7 +28,7 @@ export default function HomePage() {
     try {
       const id = nanoid();
       const supabase = getSupabase();
-      const { error } = await supabase.from("rooms").insert({
+      const { error } = await supabase.from("pp_rooms").insert({
         id,
         name: roomName.trim() || null,
         deck: DEFAULT_DECK,
@@ -52,7 +52,7 @@ export default function HomePage() {
     try {
       const supabase = getSupabase();
       const { data, error } = await supabase
-        .from("rooms")
+        .from("pp_rooms")
         .select("id")
         .eq("id", id)
         .maybeSingle();

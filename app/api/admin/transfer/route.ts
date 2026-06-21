@@ -44,7 +44,7 @@ export async function POST(req: Request) {
   const admin = getSupabaseAdmin();
 
   const { data: target, error: tErr } = await admin
-    .from("players")
+    .from("pp_players")
     .select("id")
     .eq("id", newOwnerId)
     .eq("room_id", roomId)
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
   }
 
   const { error } = await admin
-    .from("rooms")
+    .from("pp_rooms")
     .update({ owner_id: newOwnerId })
     .eq("id", roomId);
   if (error) {

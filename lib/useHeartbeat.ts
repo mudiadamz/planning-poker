@@ -47,7 +47,7 @@ export function useHeartbeat(playerId: string | null, roomId: string | null) {
       if (cancelled) return;
       try {
         const { error } = await supabase
-          .from("players")
+          .from("pp_players")
           .update({ last_seen: new Date().toISOString() })
           .eq("id", playerId)
           .eq("room_id", roomId);
@@ -94,7 +94,7 @@ export async function cleanupStalePlayers(
   const supabase = getSupabase();
   const cutoff = new Date(Date.now() - staleSeconds * 1000).toISOString();
   const { data, error } = await supabase
-    .from("players")
+    .from("pp_players")
     .delete()
     .eq("room_id", roomId)
     .lt("last_seen", cutoff)
