@@ -6,12 +6,14 @@ import { getSupabase } from "./supabase";
 import {
   HEARTBEAT_REJOIN_GRACE_SECONDS,
   JOIN_STALE_AFTER_SECONDS,
+  SOFT_LEAVE_GRACE_SECONDS,
   STALE_AFTER_SECONDS,
 } from "./presenceConstants";
 
 export {
   HEARTBEAT_REJOIN_GRACE_SECONDS,
   JOIN_STALE_AFTER_SECONDS,
+  SOFT_LEAVE_GRACE_SECONDS,
   STALE_AFTER_SECONDS,
 };
 
@@ -46,9 +48,12 @@ export function useHeartbeat(playerId: string | null, roomId: string | null) {
     async function ping() {
       if (cancelled) return;
       try {
+        // Refresh presence AND clear any soft-leave marker — a live tab
+        // (or one that just came back from a reload) is, by definition,
+        // not "leaving", so left_at must go back to NULL.
         const { error } = await supabase
           .from("pp_players")
-          .update({ last_seen: new Date().toISOString() })
+          .update({ last_seen: new Date().toISOString(), left_at: null })
           .eq("id", playerId)
           .eq("room_id", roomId);
         if (!error) lastSuccessfulHeartbeatAt.ms = Date.now();
@@ -93,11 +98,14 @@ export async function cleanupStalePlayers(
 ): Promise<number> {
   const supabase = getSupabase();
   const cutoff = new Date(Date.now() - staleSeconds * 1000).toISOString();
+  const leftCutoff = new Date(
+    Date.now() - SOFT_LEAVE_GRACE_SECONDS * 1000,
+  ).toISOString();
   const { data, error } = await supabase
     .from("pp_players")
     .delete()
     .eq("room_id", roomId)
-    .lt("last_seen", cutoff)
+    .or(`left_at.lt.${leftCutoff},last_seen.lt.${cutoff}`)
     .select("id");
   if (error) {
     console.error("cleanupStalePlayers (client) failed", error);

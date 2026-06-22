@@ -28,3 +28,10 @@ export const JOIN_STALE_AFTER_SECONDS = 90;
  *  a tiny window and nuking active players (heartbeat is 30s, so
  *  60s leaves a healthy 2x margin). */
 export const MIN_STALE_AFTER_SECONDS = 60;
+
+/** How long a player who fired the soft-leave beacon (`left_at` set) is
+ *  kept before the sweep removes them. A real tab close clears the seat
+ *  within this window; a reload re-mounts and clears `left_at` (via the
+ *  presence upsert / heartbeat) well within it, so the row is never swept
+ *  mid-reload. Must comfortably exceed a refresh round-trip. */
+export const SOFT_LEAVE_GRACE_SECONDS = 20;

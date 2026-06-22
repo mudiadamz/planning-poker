@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { STALE_AFTER_SECONDS } from "@/lib/presenceConstants";
 
 export const runtime = "nodejs";
 
@@ -11,29 +10,21 @@ export const runtime = "nodejs";
  * even after the page unloads, where a normal `fetch` from the
  * unloading page would be cancelled mid-flight.
  *
- * IMPORTANT: this is a SOFT leave — we do NOT delete the player row.
- * Why?
- *  - `pagehide` fires for both tab close AND page refresh, and we
- *    can't tell them apart at unload time.
- *  - If we deleted on every pagehide, every refresh would visibly
- *    kick the user out (others see leave/join blip; the user's own
- *    next mount would have to re-claim a deleted row).
- *
- * Instead, we slide `last_seen` just a few seconds shy of the stale
- * cutoff. That means:
- *  - On a refresh, the new mount fires its first heartbeat almost
- *    immediately, which resets `last_seen` to NOW — the row never
- *    looks stale, no other client ever sees us leave.
- *  - On a real close, no heartbeat ever comes back, so within the
- *    grace window the player tips into "stale" and the next periodic
- *    cleanup sweep removes them. (See `useStalePlayerCleanup` and
- *    `CLEANUP_INTERVAL_MS` for how fast that happens.)
+ * IMPORTANT: this is a SOFT leave — we do NOT delete the player row, and
+ * we no longer touch `last_seen`. Instead we stamp an explicit `left_at`
+ * marker. Why?
+ *  - `pagehide` fires for both tab close AND page refresh, and we can't
+ *    tell them apart at unload time.
+ *  - The cleanup sweep removes rows where `left_at` is older than
+ *    SOFT_LEAVE_GRACE_SECONDS. On a REFRESH, the new mount's presence
+ *    upsert / first heartbeat clears `left_at` back to NULL well within
+ *    the grace, so the row is never swept and no other client sees us
+ *    leave. On a REAL close, `left_at` is never cleared, so the seat is
+ *    freed within the grace window.
+ *  - Backdating `last_seen` (the old approach) made a reloading row look
+ *    ancient to the tight join-sweep window, which is exactly what let a
+ *    refresh delete-and-recreate the row and shuffle room ownership.
  */
-
-// Number of seconds the soft-leaver gets before they tip into "stale".
-// Keep this comfortably above a typical refresh round-trip (mount +
-// first heartbeat) so quick refreshes never get swept.
-const SOFT_LEAVE_GRACE_SECONDS = 10;
 
 export async function POST(req: Request) {
   let body: unknown;
@@ -65,18 +56,13 @@ export async function POST(req: Request) {
     );
   }
 
-  // Backdate `last_seen` so the row stays present for at most
-  // SOFT_LEAVE_GRACE_SECONDS unless a heartbeat (i.e. a refreshed page)
-  // refreshes it back to NOW.
-  const staleIn = SOFT_LEAVE_GRACE_SECONDS;
-  const backdated = new Date(
-    Date.now() - (STALE_AFTER_SECONDS - staleIn) * 1000,
-  ).toISOString();
-
+  // Stamp the leave marker. A refresh clears it on remount (presence
+  // upsert / heartbeat); a real close leaves it set, so the sweep frees
+  // the seat within SOFT_LEAVE_GRACE_SECONDS. `last_seen` is left alone.
   const admin = getSupabaseAdmin();
   const { error } = await admin
     .from("pp_players")
-    .update({ last_seen: backdated })
+    .update({ left_at: new Date().toISOString() })
     .eq("id", playerId)
     .eq("room_id", roomId);
 

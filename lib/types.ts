@@ -15,4 +15,6 @@ export type Player = {
   vote: string | null;
   last_seen: string;
   joined_at: string;
+  /** Soft-leave marker: set by the leave beacon, cleared on rejoin. */
+  left_at?: string | null;
 };

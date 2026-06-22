@@ -40,7 +40,13 @@ export default function RoomPage({ params }: { params: Params }) {
   const { roomId } = use(params);
   const router = useRouter();
 
-  const { playerId, playerName, setIdentity, setName, clear } = useIdentity();
+  // Identity is per-room: a stable client-generated id scoped to this room
+  // (so it survives reloads/tabs) plus a global display name.
+  const playerId = useIdentity((s) => s.playerIdByRoom[roomId] ?? null);
+  const playerName = useIdentity((s) => s.playerName);
+  const setPlayerId = useIdentity((s) => s.setPlayerId);
+  const setName = useIdentity((s) => s.setName);
+  const clearRoom = useIdentity((s) => s.clearRoom);
 
   const [room, setRoom] = useState<Room | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -64,6 +70,9 @@ export default function RoomPage({ params }: { params: Params }) {
   // (reset: revealed flips true -> false). Used to decide whether a
   // restored vote still belongs to the current round.
   const roundIdRef = useRef<number>(0);
+  // Guards against firing two concurrent auto-seat upserts (which, for a
+  // brand-new visitor with no id yet, would mint two ids → duplicate seats).
+  const seatingRef = useRef(false);
   useEffect(() => {
     playerIdRef.current = playerId;
   }, [playerId]);
@@ -288,65 +297,77 @@ export default function RoomPage({ params }: { params: Params }) {
     };
   }, [room, roomId, spawnFloater]);
 
-  // Our row vanished from the DB (stale-cleanup race, network blip, or a
-  // real disconnect) but the tab is still open. Silently auto-rejoin with
-  // the same name — no confirmation popup. If we still have a vote from the
-  // SAME round (no reset happened while we were gone), restore it so the
-  // user's card comes back exactly as they left it. Falling back to the
-  // JoinDialog (via clear()) covers the case where the name is no longer in
-  // localStorage.
+  // Ensure we're seated. We should have a row but don't — either a brand-new
+  // visitor with a saved name (auto-seat, no popup) or our row was removed
+  // during a genuine disconnect (rejoin). We UPSERT keyed on our STABLE
+  // per-room id (minting one only if we have none yet), clearing any
+  // soft-leave marker and carrying a same-round vote over. Because the id is
+  // stable, owner_id keeps matching and the seat/crown survive. Brand-new
+  // visitors with no saved name fall through to the JoinDialog instead.
   useEffect(() => {
-    if (loading || !room || !playerId || leaving) return;
-    const stillThere = players.some((p) => p.id === playerId);
-    if (!stillThere && players.length > 0) {
-      // Snapshot what we knew at the moment of disconnect.
-      const capturedVote = myLastVoteRef.current;
-      const capturedRound = roundIdRef.current;
-      const timer = window.setTimeout(() => {
-        const exists = players.some((p) => p.id === playerId);
-        if (exists) return;
-        const name = playerName;
-        clear();
-        if (!name) return;
-        void (async () => {
-          try {
-            const supabase = getSupabase();
-            // Only carry the vote over if the round hasn't advanced since we
-            // dropped (a reset clears everyone's vote, so an old vote would
-            // be wrong in a new round).
-            const sameRound = roundIdRef.current === capturedRound;
-            const restoredVote = sameRound ? capturedVote : null;
-            const { data, error: insertErr } = await supabase
-              .from("pp_players")
-              .insert({ room_id: roomId, name, vote: restoredVote })
-              .select("*")
-              .single();
-            if (insertErr) throw insertErr;
-            if (!data) return;
-            setIdentity(data.id, data.name);
-            myLastVoteRef.current = data.vote;
-            setPlayers((prev) =>
-              prev.some((p) => p.id === data.id) ? prev : [...prev, data],
-            );
-          } catch (err) {
-            console.error("auto-rejoin failed", err);
-            // Leave identity cleared so the JoinDialog can take over and
-            // the user can manually rejoin without leaving the room.
-          }
-        })();
-      }, 1500);
-      return () => window.clearTimeout(timer);
-    }
+    if (loading || notFound || !room || leaving) return;
+    const seated = playerId ? players.some((p) => p.id === playerId) : false;
+    if (seated) return;
+    const name = playerName;
+    if (!name) return; // first-ever visitor → JoinDialog collects the name
+    if (seatingRef.current) return;
+    seatingRef.current = true;
+
+    const existingId = playerId;
+    const capturedVote = myLastVoteRef.current;
+    const capturedRound = roundIdRef.current;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const supabase = getSupabase();
+        const id = existingId ?? crypto.randomUUID();
+        // Only carry the vote over if the round hasn't advanced since we
+        // dropped (a reset clears everyone's vote).
+        const sameRound = roundIdRef.current === capturedRound;
+        const restoredVote = existingId && sameRound ? capturedVote : null;
+        const { data, error: upErr } = await supabase
+          .from("pp_players")
+          .upsert(
+            {
+              id,
+              room_id: roomId,
+              name,
+              left_at: null,
+              last_seen: new Date().toISOString(),
+              ...(restoredVote != null ? { vote: restoredVote } : {}),
+            },
+            { onConflict: "id" },
+          )
+          .select("*")
+          .single();
+        if (upErr) throw upErr;
+        if (cancelled || !data) return;
+        setPlayerId(roomId, data.id);
+        myLastVoteRef.current = data.vote;
+        setPlayers((prev) =>
+          prev.some((p) => p.id === data.id)
+            ? prev.map((p) => (p.id === data.id ? data : p))
+            : [...prev, data],
+        );
+      } catch (err) {
+        console.error("auto-seat / rejoin failed", err);
+      } finally {
+        seatingRef.current = false;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     loading,
+    notFound,
     room,
     roomId,
     players,
     playerId,
     leaving,
     playerName,
-    clear,
-    setIdentity,
+    setPlayerId,
   ]);
 
   useHeartbeat(playerId, roomId);
@@ -421,27 +442,41 @@ export default function RoomPage({ params }: { params: Params }) {
 
   const isOwner = !!owner && !!me && owner.id === me.id;
 
-  const needsJoin = !loading && !notFound && room && !me && !leaving;
+  // Only prompt for a name the first time this browser is ever used (no
+  // saved name). Returning users auto-seat silently via the effect above —
+  // no popup on reload, instant join on a fresh room link.
+  const needsJoin =
+    !loading && !notFound && room && !me && !leaving && !playerName;
 
   const handleJoin = useCallback(
     async (name: string) => {
       const supabase = getSupabase();
-      const { data, error: insertErr } = await supabase
+      const id = playerId ?? crypto.randomUUID();
+      const { data, error: upErr } = await supabase
         .from("pp_players")
-        .insert({
-          room_id: roomId,
-          name,
-        })
+        .upsert(
+          {
+            id,
+            room_id: roomId,
+            name,
+            left_at: null,
+            last_seen: new Date().toISOString(),
+          },
+          { onConflict: "id" },
+        )
         .select("*")
         .single();
-      if (insertErr) throw insertErr;
+      if (upErr) throw upErr;
       if (!data) throw new Error("Insert returned no row.");
-      setIdentity(data.id, data.name);
+      setPlayerId(roomId, data.id);
+      setName(data.name);
       setPlayers((prev) =>
-        prev.some((p) => p.id === data.id) ? prev : [...prev, data],
+        prev.some((p) => p.id === data.id)
+          ? prev.map((p) => (p.id === data.id ? data : p))
+          : [...prev, data],
       );
     },
-    [roomId, setIdentity],
+    [roomId, playerId, setPlayerId, setName],
   );
 
   const handleVote = useCallback(
@@ -703,9 +738,9 @@ export default function RoomPage({ params }: { params: Params }) {
         // ignore — we are leaving anyway
       }
     }
-    clear();
+    clearRoom(roomId);
     router.push("/");
-  }, [playerId, clear, router]);
+  }, [playerId, clearRoom, roomId, router]);
 
   if (notFound) {
     return (

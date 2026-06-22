@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   JOIN_STALE_AFTER_SECONDS,
   MIN_STALE_AFTER_SECONDS,
+  SOFT_LEAVE_GRACE_SECONDS,
   STALE_AFTER_SECONDS,
 } from "@/lib/presenceConstants";
 
@@ -97,12 +98,18 @@ export async function POST(req: Request) {
   }
 
   const cutoff = new Date(Date.now() - staleSeconds * 1000).toISOString();
+  const leftCutoff = new Date(
+    Date.now() - SOFT_LEAVE_GRACE_SECONDS * 1000,
+  ).toISOString();
   const admin = getSupabaseAdmin();
 
+  // Remove rows that either explicitly left (left_at past the grace) OR
+  // went silent (last_seen past the stale window). left_at = NULL rows
+  // only match via the last_seen branch, so present players are safe.
   let query = admin
     .from("pp_players")
     .delete()
-    .lt("last_seen", cutoff)
+    .or(`left_at.lt.${leftCutoff},last_seen.lt.${cutoff}`)
     .select("id");
   if (roomId) query = query.eq("room_id", roomId);
 
@@ -134,11 +141,14 @@ export async function GET(req: Request) {
   if (unauthorized) return unauthorized;
 
   const cutoff = new Date(Date.now() - STALE_AFTER_SECONDS * 1000).toISOString();
+  const leftCutoff = new Date(
+    Date.now() - SOFT_LEAVE_GRACE_SECONDS * 1000,
+  ).toISOString();
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("pp_players")
     .delete()
-    .lt("last_seen", cutoff)
+    .or(`left_at.lt.${leftCutoff},last_seen.lt.${cutoff}`)
     .select("id");
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

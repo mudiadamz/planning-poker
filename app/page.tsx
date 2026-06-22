@@ -7,6 +7,7 @@ import { Loader2, Plus, LogIn, Spade } from "lucide-react";
 
 import { getSupabase } from "@/lib/supabase";
 import { DEFAULT_DECK } from "@/lib/decks";
+import { useIdentity } from "@/lib/store";
 
 const nanoid = customAlphabet(
   "23456789abcdefghjkmnpqrstuvwxyz",
@@ -15,6 +16,7 @@ const nanoid = customAlphabet(
 
 export default function HomePage() {
   const router = useRouter();
+  const setPlayerId = useIdentity((s) => s.setPlayerId);
   const [roomName, setRoomName] = useState("");
   const [joinId, setJoinId] = useState("");
   const [creating, setCreating] = useState(false);
@@ -27,14 +29,22 @@ export default function HomePage() {
     setCreating(true);
     try {
       const id = nanoid();
+      // Pin the creator as the room owner up front. Their per-room player
+      // id is generated here (and reused when they land on the room page),
+      // so ownership is anchored to a stable id instead of "earliest
+      // joined_at" — surviving reloads. owner_id only moves when this
+      // player is actually removed (see the pp_reassign_owner trigger).
+      const creatorId = crypto.randomUUID();
       const supabase = getSupabase();
       const { error } = await supabase.from("pp_rooms").insert({
         id,
         name: roomName.trim() || null,
         deck: DEFAULT_DECK,
         revealed: false,
+        owner_id: creatorId,
       });
       if (error) throw error;
+      setPlayerId(id, creatorId);
       router.push(`/room/${id}`);
     } catch (err) {
       console.error(err);
