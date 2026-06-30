@@ -15,6 +15,7 @@ import {
   useHeartbeat,
   useStalePlayerCleanup,
 } from "@/lib/useHeartbeat";
+import { useRealtimeReconnect } from "@/lib/realtimeReconnect";
 import type { Player, Room } from "@/lib/types";
 import { JoinDialog } from "@/components/JoinDialog";
 import { RoomControls } from "@/components/RoomControls";
@@ -60,6 +61,10 @@ export default function RoomPage({ params }: { params: Params }) {
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [broadcastBusy, setBroadcastBusy] = useState(false);
   const [broadcastError, setBroadcastError] = useState<string | null>(null);
+  // Bumped to force the realtime subscription to tear down and resubscribe
+  // (and to silently re-fetch state) after the WebSocket dies on an inactive
+  // tab. See `useRealtimeReconnect` below.
+  const [reconnectNonce, setReconnectNonce] = useState(0);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const playerIdRef = useRef<string | null>(null);
@@ -163,7 +168,49 @@ export default function RoomPage({ params }: { params: Params }) {
     };
   }, [roomId]);
 
-  // Realtime subscription
+  // Silent reconcile after a realtime reconnect. Re-fetches room + players
+  // WITHOUT flipping the full-screen `loading` spinner, so a tab that just
+  // woke up quietly catches up on whatever changed while its socket was dead.
+  // Skipped on first render (nonce 0) — the initial load above already covers
+  // the cold start.
+  useEffect(() => {
+    if (reconnectNonce === 0) return;
+    let cancelled = false;
+    const supabase = getSupabase();
+    void (async () => {
+      try {
+        const { data: roomData, error: roomErr } = await supabase
+          .from("pp_rooms")
+          .select("*")
+          .eq("id", roomId)
+          .maybeSingle();
+        if (roomErr) throw roomErr;
+        if (cancelled) return;
+        if (!roomData) {
+          setNotFound(true);
+          return;
+        }
+        const { data: playerData, error: playerErr } = await supabase
+          .from("pp_players")
+          .select("*")
+          .eq("room_id", roomId)
+          .order("joined_at", { ascending: true });
+        if (playerErr) throw playerErr;
+        if (cancelled) return;
+        setRoom(roomData);
+        setPlayers(playerData ?? []);
+      } catch (err) {
+        console.error("reconnect reconcile failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reconnectNonce, roomId]);
+
+  // Realtime subscription. Re-runs (tearing down + recreating the channel)
+  // whenever `reconnectNonce` is bumped, which is how we recover the socket
+  // after an inactive tab kills it.
   useEffect(() => {
     if (!room) return;
     const supabase = getSupabase();
@@ -295,7 +342,7 @@ export default function RoomPage({ params }: { params: Params }) {
       void supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [room, roomId, spawnFloater]);
+  }, [room, roomId, spawnFloater, reconnectNonce]);
 
   // Ensure we're seated. We should have a row but don't — either a brand-new
   // visitor with a saved name (auto-seat, no popup) or our row was removed
@@ -372,6 +419,16 @@ export default function RoomPage({ params }: { params: Params }) {
 
   useHeartbeat(playerId, roomId);
   useStalePlayerCleanup(playerId ? roomId : null);
+
+  // Recover the realtime socket after an inactive tab kills it. When the tab
+  // wakes (visibility/focus/online) and the channel is in a dead state, bump
+  // the nonce so the subscription effect recreates the channel and the
+  // reconcile effect re-fetches state — no manual reload required.
+  useRealtimeReconnect({
+    enabled: !!room,
+    getState: () => channelRef.current?.state ?? null,
+    reconnect: () => setReconnectNonce((n) => n + 1),
+  });
 
   // Cleanup on tab close / window close. We use `navigator.sendBeacon`
   // because regular fetch / supabase delete promises get aborted when the
