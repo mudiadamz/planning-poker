@@ -16,6 +16,17 @@ import {
   useStalePlayerCleanup,
 } from "@/lib/useHeartbeat";
 import { useRealtimeReconnect } from "@/lib/realtimeReconnect";
+import {
+  applyPlayerDelete,
+  applyPlayerInsert,
+  applyPlayerUpdate,
+  reconcilePlayers,
+} from "@/lib/players";
+import {
+  didRoundReset,
+  didRoundReveal,
+  shouldRestoreVote,
+} from "@/lib/roomState";
 import type { Player, Room } from "@/lib/types";
 import { JoinDialog } from "@/components/JoinDialog";
 import { RoomControls } from "@/components/RoomControls";
@@ -150,7 +161,7 @@ export default function RoomPage({ params }: { params: Params }) {
 
         if (!cancelled) {
           setRoom(roomData);
-          setPlayers(playerData ?? []);
+          setPlayers(reconcilePlayers(playerData ?? []));
         }
       } catch (err) {
         console.error(err);
@@ -197,8 +208,19 @@ export default function RoomPage({ params }: { params: Params }) {
           .order("joined_at", { ascending: true });
         if (playerErr) throw playerErr;
         if (cancelled) return;
-        setRoom(roomData);
-        setPlayers(playerData ?? []);
+        // Adopt the admin's current state. If the room was revealed or reset
+        // while our socket was dead, surface that transition with the usual
+        // cue so the rejoining user perceives the change.
+        setRoom((prev) => {
+          if (didRoundReveal(prev, roomData)) playSound("reveal");
+          else if (didRoundReset(prev, roomData)) playSound("reset");
+          return roomData;
+        });
+        setPlayers(reconcilePlayers(playerData ?? []));
+        // A reconnect can hide a missed round boundary (e.g. reveal→reset→…
+        // we never saw), so treat it as a new round: never restore a
+        // pre-disconnect vote afterwards — the server is the source of truth.
+        roundIdRef.current += 1;
       } catch (err) {
         console.error("reconnect reconcile failed", err);
       }
@@ -227,14 +249,12 @@ export default function RoomPage({ params }: { params: Params }) {
           }
           const next = payload.new as Room;
           setRoom((prev) => {
-            if (prev) {
-              if (!prev.revealed && next.revealed) playSound("reveal");
-              else if (prev.revealed && !next.revealed) {
-                playSound("reset");
-                // A new voting round began — invalidate any vote we might
-                // restore on rejoin.
-                roundIdRef.current += 1;
-              }
+            if (didRoundReveal(prev, next)) playSound("reveal");
+            else if (didRoundReset(prev, next)) {
+              playSound("reset");
+              // A new voting round began — invalidate any vote we might
+              // restore on rejoin.
+              roundIdRef.current += 1;
             }
             return next;
           });
@@ -252,21 +272,33 @@ export default function RoomPage({ params }: { params: Params }) {
           if (payload.eventType === "INSERT") {
             const p = payload.new as Player;
             setPlayers((prev) => {
-              if (prev.some((x) => x.id === p.id)) return prev;
-              if (p.id !== playerIdRef.current) playSound("join");
-              return [...prev, p];
+              const next = applyPlayerInsert(prev, p);
+              // `next === prev` ⇒ duplicate/echoed event, no real arrival.
+              if (next !== prev && p.id !== playerIdRef.current)
+                playSound("join");
+              return next;
             });
           } else if (payload.eventType === "UPDATE") {
             const p = payload.new as Player;
-            setPlayers((prev) =>
-              prev.map((x) => (x.id === p.id ? p : x)),
-            );
+            // Upsert, NOT map-replace: if we missed this player's INSERT while
+            // our socket was dead, this is the event that finally surfaces
+            // them — dropping it is what left clients with mismatched rosters.
+            setPlayers((prev) => {
+              const next = applyPlayerUpdate(prev, p);
+              if (
+                !prev.some((x) => x.id === p.id) &&
+                p.id !== playerIdRef.current
+              )
+                playSound("join");
+              return next;
+            });
           } else if (payload.eventType === "DELETE") {
             const old = payload.old as Player;
             setPlayers((prev) => {
-              if (!prev.some((x) => x.id === old.id)) return prev;
-              if (old.id !== playerIdRef.current) playSound("leave");
-              return prev.filter((x) => x.id !== old.id);
+              const next = applyPlayerDelete(prev, old.id);
+              if (next !== prev && old.id !== playerIdRef.current)
+                playSound("leave");
+              return next;
             });
           }
         },
@@ -294,9 +326,9 @@ export default function RoomPage({ params }: { params: Params }) {
         const id = payload?.player_id;
         if (!id) return;
         setPlayers((prev) => {
-          if (!prev.some((x) => x.id === id)) return prev;
-          if (id !== playerIdRef.current) playSound("leave");
-          return prev.filter((x) => x.id !== id);
+          const next = applyPlayerDelete(prev, id);
+          if (next !== prev && id !== playerIdRef.current) playSound("leave");
+          return next;
         });
       })
       .on("broadcast", { event: "message" }, (msg) => {
@@ -369,9 +401,16 @@ export default function RoomPage({ params }: { params: Params }) {
         const supabase = getSupabase();
         const id = existingId ?? crypto.randomUUID();
         // Only carry the vote over if the round hasn't advanced since we
-        // dropped (a reset clears everyone's vote).
+        // dropped (a reset — or a reconnect that may have hidden one —
+        // clears everyone's vote).
         const sameRound = roundIdRef.current === capturedRound;
-        const restoredVote = existingId && sameRound ? capturedVote : null;
+        const restoredVote = shouldRestoreVote({
+          hasExistingId: !!existingId,
+          sameRound,
+          vote: capturedVote,
+        })
+          ? capturedVote
+          : null;
         const { data, error: upErr } = await supabase
           .from("pp_players")
           .upsert(
