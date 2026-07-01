@@ -36,7 +36,7 @@ describe("channelNeedsResubscribe", () => {
 });
 
 describe("RealtimeReconnector", () => {
-  it("does NOT reconnect while the channel is healthy", () => {
+  it("does NOT reconnect while the channel is healthy (unforced poll path)", () => {
     const reconnect = vi.fn();
     const r = new RealtimeReconnector({
       getState: () => "joined",
@@ -44,6 +44,31 @@ describe("RealtimeReconnector", () => {
     });
     expect(r.check()).toBe(false);
     expect(reconnect).not.toHaveBeenCalled();
+  });
+
+  it("FORCE reconnects even when the channel claims to be healthy (mobile zombie socket)", () => {
+    const reconnect = vi.fn();
+    const r = new RealtimeReconnector({
+      getState: () => "joined", // the socket lies after a mobile resume
+      reconnect,
+    });
+    expect(r.check(true)).toBe(true);
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("still throttles forced reconnects", () => {
+    const reconnect = vi.fn();
+    let clock = 0;
+    const r = new RealtimeReconnector({
+      getState: () => "joined",
+      reconnect,
+      now: () => clock,
+      minIntervalMs: 5_000,
+    });
+    expect(r.check(true)).toBe(true);
+    clock += 1_000;
+    expect(r.check(true)).toBe(false); // inside the throttle window
+    expect(reconnect).toHaveBeenCalledTimes(1);
   });
 
   it("reconnects when the channel is dead (the inactive-tab case)", () => {
@@ -140,7 +165,10 @@ describe("installRealtimeReconnect (DOM wiring)", () => {
     expect(reconnect).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing when the tab becomes visible but the channel is still healthy", () => {
+  it("refreshes when the tab becomes visible EVEN IF the channel claims healthy (mobile zombie socket)", () => {
+    // The core mobile fix: after minimise/resume the socket is dead but
+    // `channel.state` still says "joined", so a state-gated reconnect would
+    // wrongly skip and leave the room frozen. The wake signal forces a refresh.
     const reconnect = vi.fn();
     cleanup = installRealtimeReconnect({
       getState: () => "joined",
@@ -150,6 +178,48 @@ describe("installRealtimeReconnect (DOM wiring)", () => {
 
     setVisibility("visible");
     document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT refresh on visibilitychange when the tab went HIDDEN", () => {
+    const reconnect = vi.fn();
+    cleanup = installRealtimeReconnect({
+      getState: () => "closed",
+      reconnect,
+      isVisible: () => document.visibilityState === "visible",
+    });
+
+    setVisibility("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(reconnect).not.toHaveBeenCalled();
+  });
+
+  it("refreshes on a bfcache restore (pageshow persisted) — the mobile resume path", () => {
+    const reconnect = vi.fn();
+    cleanup = installRealtimeReconnect({
+      getState: () => "joined",
+      reconnect,
+    });
+
+    const evt = new Event("pageshow") as PageTransitionEvent;
+    Object.defineProperty(evt, "persisted", { value: true });
+    window.dispatchEvent(evt);
+
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a non-persisted pageshow (an ordinary page load)", () => {
+    const reconnect = vi.fn();
+    cleanup = installRealtimeReconnect({
+      getState: () => "joined",
+      reconnect,
+    });
+
+    const evt = new Event("pageshow") as PageTransitionEvent;
+    Object.defineProperty(evt, "persisted", { value: false });
+    window.dispatchEvent(evt);
 
     expect(reconnect).not.toHaveBeenCalled();
   });
@@ -218,6 +288,9 @@ describe("installRealtimeReconnect (DOM wiring)", () => {
       window.dispatchEvent(new Event("online"));
       window.dispatchEvent(new Event("focus"));
       document.dispatchEvent(new Event("visibilitychange"));
+      const ps = new Event("pageshow") as PageTransitionEvent;
+      Object.defineProperty(ps, "persisted", { value: true });
+      window.dispatchEvent(ps);
       vi.advanceTimersByTime(5_000);
 
       expect(reconnect).not.toHaveBeenCalled();

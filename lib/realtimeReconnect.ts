@@ -87,11 +87,19 @@ export class RealtimeReconnector {
   }
 
   /**
-   * If the channel is dead and we're past the throttle window, fire a
-   * reconnect. Returns `true` when a reconnect was triggered.
+   * Maybe fire a reconnect, subject to the throttle window. Returns `true`
+   * when one was triggered.
+   *
+   * `force` exists because of mobile: when an app is minimised the OS suspends
+   * the tab and the WebSocket is severed WITHOUT the frozen JS ever processing
+   * a close event, so on resume `channel.state` still lies "joined". A wake
+   * signal (tab visible again / bfcache restore / focus / network back) must
+   * therefore refresh UNCONDITIONALLY — we cannot trust the reported state.
+   * The unforced path (the periodic safety poll) still gates on a dead state
+   * so an idle foreground tab doesn't churn.
    */
-  check(): boolean {
-    if (!channelNeedsResubscribe(this.getState())) return false;
+  check(force = false): boolean {
+    if (!force && !channelNeedsResubscribe(this.getState())) return false;
     const t = this.now();
     if (t - this.lastAttempt < this.minIntervalMs) return false;
     this.lastAttempt = t;
@@ -126,13 +134,22 @@ export function installRealtimeReconnect(
       typeof document === "undefined" ||
       document.visibilityState === "visible");
 
-  // Only react to a tab *becoming* visible / focused — those are the moments a
-  // user would otherwise notice the freeze. `online`/`focus` always check.
+  // Wake signals → FORCE a refresh (state may be silently stale even though the
+  // channel claims to be healthy — see RealtimeReconnector.check). The periodic
+  // poll stays unforced so an idle foreground tab doesn't needlessly churn.
   const onVisibility = () => {
-    if (isVisible()) reconnector.check();
+    if (isVisible()) reconnector.check(true);
   };
   const onFocusOrOnline = () => {
-    reconnector.check();
+    reconnector.check(true);
+  };
+  // `pageshow` is the reliable mobile signal: returning to a backgrounded PWA /
+  // browser tab restores it from the bfcache and fires this with
+  // `persisted === true`. A non-persisted pageshow is just a normal page load
+  // (already covered by the initial fetch), so we ignore it to avoid a
+  // redundant refresh and an unwanted round-counter bump on first paint.
+  const onPageShow = (e: Event) => {
+    if ((e as PageTransitionEvent).persisted) reconnector.check(true);
   };
   const onPoll = () => {
     if (isVisible()) reconnector.check();
@@ -141,12 +158,14 @@ export function installRealtimeReconnect(
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("focus", onFocusOrOnline);
   window.addEventListener("online", onFocusOrOnline);
+  window.addEventListener("pageshow", onPageShow);
   const pollId = window.setInterval(onPoll, pollMs);
 
   return () => {
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("focus", onFocusOrOnline);
     window.removeEventListener("online", onFocusOrOnline);
+    window.removeEventListener("pageshow", onPageShow);
     window.clearInterval(pollId);
   };
 }
