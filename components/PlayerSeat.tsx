@@ -74,16 +74,8 @@ export function PlayerSeat({
           "flex max-w-[100px] items-center justify-center gap-1 truncate text-center font-serif text-xs font-medium sm:max-w-[140px] sm:text-sm",
           isMe ? "text-gold-soft" : "text-ivory",
         )}
-        title={
-          isOwner ? `${player.name} (room owner)` : player.name
-        }
+        title={player.name}
       >
-        {isOwner && (
-          <Crown
-            className="h-3 w-3 flex-shrink-0 text-gold-soft sm:h-3.5 sm:w-3.5"
-            aria-label="Room owner"
-          />
-        )}
         <span className="truncate">{player.name}</span>
         {isMe && (
           <span className="text-[10px] text-ivory-dim sm:text-xs">
