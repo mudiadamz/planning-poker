@@ -602,7 +602,8 @@ export default function RoomPage({ params }: { params: Params }) {
   );
 
   const handleReveal = useCallback(async () => {
-    if (!room || busy || !isOwner || !playerId) return;
+    // Any seated player can reveal — not just the owner.
+    if (!room || busy || !playerId) return;
     setBusy(true);
     try {
       const supabase = getSupabase();
@@ -617,10 +618,11 @@ export default function RoomPage({ params }: { params: Params }) {
     } finally {
       setBusy(false);
     }
-  }, [room, busy, isOwner, playerId]);
+  }, [room, busy, playerId]);
 
   const handleReset = useCallback(async () => {
-    if (!room || busy || !isOwner || !playerId) return;
+    // Any seated player can start a new voting round — not just the owner.
+    if (!room || busy || !playerId) return;
     setBusy(true);
     try {
       const supabase = getSupabase();
@@ -637,7 +639,7 @@ export default function RoomPage({ params }: { params: Params }) {
     } finally {
       setBusy(false);
     }
-  }, [room, busy, isOwner, playerId]);
+  }, [room, busy, playerId]);
 
   const handleDeckChange = useCallback(
     async (deck: string[]) => {
@@ -948,6 +950,7 @@ export default function RoomPage({ params }: { params: Params }) {
             meId={playerId}
             ownerId={owner?.id ?? null}
             isOwner={isOwner}
+            canControl={!!me}
             onReveal={handleReveal}
             onReset={handleReset}
             onKick={handleKick}

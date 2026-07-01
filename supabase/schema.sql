@@ -175,8 +175,13 @@ security definer
 set search_path = public
 as $$
 begin
-  if not public.is_room_owner(p_room_id, p_player_id) then
-    raise exception 'Only the room owner can reveal cards'
+  -- Any player seated in the room may reveal (not just the owner). We still
+  -- require membership so a random anon with the room id can't flip state.
+  if not exists (
+    select 1 from public.players
+     where room_id = p_room_id and id = p_player_id
+  ) then
+    raise exception 'Only players in this room can reveal cards'
       using errcode = '42501';
   end if;
   update public.rooms set revealed = true where id = p_room_id;
@@ -198,8 +203,12 @@ declare
   v_vote_count  integer;
   v_average     numeric;
 begin
-  if not public.is_room_owner(p_room_id, p_player_id) then
-    raise exception 'Only the room owner can reset votes'
+  -- Any player seated in the room may start a new round (not just the owner).
+  if not exists (
+    select 1 from public.players
+     where room_id = p_room_id and id = p_player_id
+  ) then
+    raise exception 'Only players in this room can reset votes'
       using errcode = '42501';
   end if;
 

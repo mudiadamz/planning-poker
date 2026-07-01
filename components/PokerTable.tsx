@@ -13,6 +13,9 @@ type Props = {
   meId: string | null;
   ownerId: string | null;
   isOwner: boolean;
+  /** Whether the viewer may reveal / start a new round. Any seated player
+   *  can, not just the owner (seat management stays owner-only). */
+  canControl: boolean;
   onReveal: () => void;
   onReset: () => void;
   onKick?: (playerId: string) => void;
@@ -79,6 +82,7 @@ export function PokerTable({
   meId,
   ownerId,
   isOwner,
+  canControl,
   onReveal,
   onReset,
   onKick,
@@ -169,7 +173,7 @@ export function PokerTable({
                 "radial-gradient(circle at 50% 50%, transparent 96%, rgba(212,175,55,0.0) 100%)",
             }}
           />
-          {isOwner ? (
+          {canControl ? (
             room.revealed ? (
               <button
                 onClick={onReset}
@@ -203,9 +207,9 @@ export function PokerTable({
           ) : (
             <p className="font-serif text-xs font-medium uppercase tracking-wider text-ivory/85 sm:text-sm">
               {room.revealed
-                ? "Menunggu owner memulai voting baru..."
+                ? "Menunggu voting baru dimulai..."
                 : anyVoted
-                  ? "Menunggu owner reveal kartu..."
+                  ? "Menunggu kartu di-reveal..."
                   : "Pilih kartu kamu!"}
             </p>
           )}
